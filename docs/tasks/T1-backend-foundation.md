@@ -2,6 +2,8 @@
 
 Source of truth for product rules: `idead.md` at the repo root (Vietnamese). Read §7, §9, §10, §11, §13, §15, §16, §17, §18, §19, §21 first.
 
+> **MANDATORY: read `AGENTS.md` at the repo root first. ZERO-COST POLICY applies to you: nothing that costs extra money, no API keys, no paid services, no card-required trials. If something needs payment or quota runs out: STOP, mark BLOCKED, report. Fail closed.**
+
 ## Goal
 Build the backend foundation that all later parallel tasks code against: SQLite schema, persistent queue, state machines, typed models, abstract interfaces, and a FastAPI skeleton with auth. Later tasks (connectors, orchestrator/AI adapters, briefs/scoring, Telegram, dashboard) will be developed in parallel against the interfaces you define — so make the interfaces precise and document them.
 

@@ -2,6 +2,8 @@
 
 Source of truth for product rules: `idead.md` at the repo root (Vietnamese). Read §4.3, §6.5, §15–§17, §21 (Bước 2) first.
 
+> **MANDATORY: read `AGENTS.md` at the repo root first. ZERO-COST POLICY applies to you: nothing that costs extra money, no API keys, no paid services, no card-required trials. If something needs payment or quota runs out: STOP, mark BLOCKED, report. Fail closed.**
+
 ## Goal
 Verify with REAL experiments what is actually possible on this Windows machine before the system is built. Output an honest report with `PASS` / `FAIL` / `BLOCKED` per experiment.
 
