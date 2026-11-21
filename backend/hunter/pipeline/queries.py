@@ -52,7 +52,9 @@ def revision_candidates(database: Database) -> list[RevisionCandidate]:
         ]
 
 
-def items_missing_process_job(database: Database, source_id: str) -> list[str]:
+def items_missing_process_job(
+    database: Database, source_id: str, *, since: datetime | None = None,
+) -> list[str]:
     with database.connection() as connection:
         return [
             row["id"]
@@ -61,8 +63,9 @@ def items_missing_process_job(database: Database, source_id: str) -> list[str]:
                        SELECT 1 FROM jobs WHERE idempotency_key = 'process:' || r.id
                    ) AND NOT EXISTS (
                        SELECT 1 FROM briefs WHERE raw_item_id = r.id
-                   ) ORDER BY r.fetched_at, r.id""",
-                (source_id,),
+                   ) AND (? IS NULL OR r.created_at > ?)
+                   ORDER BY r.fetched_at, r.id""",
+                (source_id, utc_iso(since) if since else None, utc_iso(since) if since else None),
             )
         ]
 

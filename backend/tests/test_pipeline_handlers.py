@@ -18,7 +18,7 @@ from hunter.models import (
     RawItem, ReviewInput, Source, SourceInput, WorkerKind,
 )
 from hunter.orchestrator import Orchestrator
-from hunter.pipeline import Dependencies, Pipeline, register_all
+from hunter.pipeline import Dependencies, DraftGate, Pipeline, register_all
 from hunter.queue import PersistentQueue
 from hunter.services.brief_store import BriefStore
 from hunter.services.operations import OperationsService
@@ -142,6 +142,7 @@ class PipelineFixture:
         self.deps = Dependencies(
             self.operations, self.briefs, self.ingest, self.cluster, self.ai,
             build_connector=lambda source: self.connector,
+            gate=DraftGate(min_virality=0.0, min_relevance=0.0),
         )
         self.pipeline = register_all(self.orchestrator, self.deps)
 

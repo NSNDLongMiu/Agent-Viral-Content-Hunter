@@ -1,5 +1,6 @@
 """Public ports and registration for the content pipeline."""
 
-from .handlers import Dependencies, Pipeline, register_all
+from .gate import DraftGate
+from .handlers import Dependencies, Pipeline, ScanStats, register_all
 
-__all__ = ["Dependencies", "Pipeline", "register_all"]
+__all__ = ["Dependencies", "DraftGate", "Pipeline", "ScanStats", "register_all"]

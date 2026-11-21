@@ -77,6 +77,13 @@ Chính sách ngân sách được khóa cứng trong toàn bộ hệ thống:
 | Khóa trong TOML | Biến môi trường | Kiểu dữ liệu | Mặc định | Ý nghĩa và Hướng dẫn |
 |---|---|---|---|---|
 | `enabled` | `HUNTER_RUNTIME__ENABLED` | Boolean | `false` | Bật hoặc tắt việc tự động kích hoạt các worker quét tin và xử lý trong tiến trình nền uvicorn. |
+| `draft_min_virality` | `HUNTER_RUNTIME__DRAFT_MIN_VIRALITY` | Float | `60.0` | Ngưỡng điểm lan truyền tối thiểu (0.0–100.0) để bài viết đủ điều kiện đưa vào luồng tạo brief AI. Tiết kiệm quota thuê bao AI và ưu tiên nội dung chất lượng cao. |
+| `draft_min_relevance` | `HUNTER_RUNTIME__DRAFT_MIN_RELEVANCE` | Float | `45.0` | Ngưỡng điểm phù hợp tối thiểu (0.0–100.0) kết hợp với độ lan truyền để xét duyệt bài viết. |
+| `max_drafts_per_scan` | `HUNTER_RUNTIME__MAX_DRAFTS_PER_SCAN` | Số nguyên | `8` | Số lượng bài viết tối đa được chọn để tạo brief AI trong mỗi lượt quét (tối thiểu 1). Giới hạn số lượng draft tránh dồn ứ hàng đợi và cạn kiệt quota. |
+
+> [!IMPORTANT]
+> **Cơ chế lọc bài Draft Gate (tiết kiệm quota AI):**
+> Một bài viết bị bỏ qua (skipped) ở lượt quét hiện tại do không đủ điều kiện điểm số hoặc vượt quá trần số lượng (`max_drafts_per_scan`) sẽ được lưu trữ an toàn trong SQLite dưới dạng bằng chứng thô (`raw_items`) mà không tạo brief và không tiêu tốn lượt gọi AI Gemini. Do cơ chế chống trùng lặp (deduplication) tại tầng Ingest, các lượt quét sau sẽ coi bài viết này là trùng lặp và không đánh giá lại trong phiên bản MVP này (tính năng phát hiện xu hướng mới nổi - emerging-viral detection qua snapshot số liệu thứ hai sẽ được phát triển ở giai đoạn sau).
 
 ---
 

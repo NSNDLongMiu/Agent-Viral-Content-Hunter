@@ -21,6 +21,10 @@ scheduler_tick_seconds = 30
 telegram_poll_seconds = 1
 dashboard_dir = "dashboard/dist"
 dashboard_url = "http://127.0.0.1:8000"
+# Draft gate: do not spend AI on weak items (tiết kiệm quota, ưu tiên chất lượng)
+draft_min_virality = 60.0
+draft_min_relevance = 45.0
+max_drafts_per_scan = 8
 
 [auth]
 session_ttl_seconds = 28800

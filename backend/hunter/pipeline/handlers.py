@@ -25,7 +25,17 @@ from hunter.services.operations import OperationsService
 from hunter.state import InvalidTransition, NotFound
 
 from .cooldown import failure_message, server_wait_remaining
+from .gate import DraftGate
 from .queries import brief_for_item, collect_history, items_missing_process_job, revision_candidates
+
+
+@dataclass(frozen=True)
+class ScanStats:
+    collected: int = 0
+    new: int = 0
+    eligible: int = 0
+    selected: int = 0
+    skipped: int = 0
 
 
 class CollectFlow(Protocol):
@@ -53,6 +63,7 @@ class Dependencies:
     collect: CollectFlow | None = None
     fetch_limits: FetchLimits = field(default_factory=FetchLimits)
     scorer: Scorer = field(default_factory=RuleScorer)
+    gate: DraftGate = DraftGate()
 
 
 class _DraftFailure(Exception):
@@ -99,6 +110,7 @@ class Pipeline:
         self.queue = queue
         self.deps = deps
         self._connector_locks: dict[str, asyncio.Lock] = {}
+        self.last_scan: dict[str, ScanStats] = {}
 
     async def collect(self, job: Job) -> JobError | None:
         source_id = _identifier(job, "source_id")
@@ -121,9 +133,6 @@ class Pipeline:
 
     async def _collect_source(self, source: Source) -> JobError | None:
         deps = self.deps
-        for raw_item_id in items_missing_process_job(self.queue.database, source.id):
-            self._enqueue_process(raw_item_id)
-
         health = next(
             (health for health in deps.operations.connector_health() if health.connector_id == source.connector_id),
             None,
@@ -158,7 +167,44 @@ class Pipeline:
             ))
             return JobError.ERROR
 
-        for raw_item_id in result.new_item_ids:
+        recovery_since = last_scan.updated_at if last_scan else None
+        recovery_ids = items_missing_process_job(self.queue.database, source.id, since=recovery_since)
+        all_new_ids = list(dict.fromkeys([*recovery_ids, *result.new_item_ids]))
+
+        # Call ClusterPort.assign for ALL new items first (cross-source corroboration)
+        for raw_item_id in all_new_ids:
+            try:
+                deps.cluster.assign(raw_item_id)
+            except NotFound:
+                pass
+
+        # Score each new item with ClusterPort.related_items + the scorer
+        candidates: list[tuple[str, ScoringResult]] = []
+        for raw_item_id in all_new_ids:
+            related = deps.cluster.related_items(raw_item_id)
+            if not related:
+                continue
+            candidates.append((raw_item_id, deps.scorer.score(related)))
+
+        # Apply the draft gate
+        eligible_count = sum(1 for _, scoring in candidates if deps.gate.is_eligible(scoring))
+        selected_ids = deps.gate.select(candidates)
+
+        collected_count = len(result.new_item_ids) + result.duplicate_count + result.rejected_count
+        new_count = len(all_new_ids)
+        selected_count = len(selected_ids)
+        skipped_count = new_count - selected_count
+
+        self.last_scan[source.id] = ScanStats(
+            collected=collected_count,
+            new=new_count,
+            eligible=eligible_count,
+            selected=selected_count,
+            skipped=skipped_count,
+        )
+
+        # Enqueue process_item ONLY for the selected items
+        for raw_item_id in selected_ids:
             self._enqueue_process(raw_item_id)
         return None
 

@@ -107,7 +107,10 @@ def test_runtime_runs_real_pipeline_with_fakes_and_shuts_down(tmp_path: Path) ->
     token = "test-fixture-claude-token-not-a-secret"
     settings = Settings(
         database_path=tmp_path / "hunter.sqlite3", auth=AuthSettings(claude_service_token=token),
-        runtime=RuntimeSettings(enabled=True, scheduler_tick_seconds=0.01, telegram_poll_seconds=0.01),
+        runtime=RuntimeSettings(
+            enabled=True, scheduler_tick_seconds=0.01, telegram_poll_seconds=0.01,
+            draft_min_virality=0.0, draft_min_relevance=0.0,
+        ),
     )
     runtimes: list[Runtime] = []
     original_threads = set(running_threads())

@@ -14,9 +14,9 @@ from hunter.ai.cli_runner import SubprocessRunner
 from hunter.api.dependencies import Services
 from hunter.ingest import ClusterService, Ingestor, collect
 from hunter.interfaces import AIWorker, Connector
-from hunter.models import AIName, Source
+from hunter.models import AIName, Job, JobError, Source
 from hunter.orchestrator import Orchestrator
-from hunter.pipeline import Dependencies, register_all
+from hunter.pipeline import Dependencies, DraftGate, register_all
 from hunter.scheduler import Scheduler
 from hunter.services.retention import RetentionService
 from hunter.telegram.transport import TelegramTransport
@@ -80,14 +80,35 @@ class Runtime:
         # publishing Claude's disabled headless state would block interactive reviews.
         self.orchestrator = Orchestrator(services.queue, monitor=services.monitor)
         ingest = Ingestor(services.database)
+        gate = DraftGate(
+            min_virality=self.settings.draft_min_virality,
+            min_relevance=self.settings.draft_min_relevance,
+            max_per_scan=self.settings.max_drafts_per_scan,
+        )
         dependencies = Dependencies(
             operations=services.operations, briefs=services.briefs, ingest=ingest,
             cluster=ClusterService(services.database), ai_worker=self.adapters[AIName.GEMINI],
-            collect=collect,
+            collect=collect, gate=gate,
         )
         if build_connector is not None:
             dependencies = replace(dependencies, build_connector=build_connector)
         pipeline = register_all(self.orchestrator, dependencies)
+        self.pipeline = pipeline
+
+        async def collect_with_logging(job: Job) -> JobError | None:
+            source_id = job.payload.get("source_id")
+            prev_scan = pipeline.last_scan.get(source_id) if isinstance(source_id, str) else None
+            outcome = await pipeline.collect(job)
+            if isinstance(source_id, str) and source_id in pipeline.last_scan:
+                stats = pipeline.last_scan[source_id]
+                if stats is not prev_scan:
+                    _LOG.info(
+                        "Scan completed for source %s: collected=%d, new=%d, eligible=%d, selected=%d, skipped=%d",
+                        source_id, stats.collected, stats.new, stats.eligible, stats.selected, stats.skipped,
+                    )
+            return outcome
+
+        self.orchestrator.register("collect", collect_with_logging)
         self.scheduler = Scheduler(
             services.queue, services.operations, ingest, pipeline.watch_revisions,
             resource_gate=self.orchestrator.governor.allows_claim,

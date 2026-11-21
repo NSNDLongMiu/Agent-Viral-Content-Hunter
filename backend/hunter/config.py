@@ -61,6 +61,9 @@ class RuntimeSettings(ConfigModel):
     telegram_poll_seconds: float = Field(default=1, gt=0, allow_inf_nan=False)
     dashboard_dir: Path = Path("dashboard/dist")
     dashboard_url: str = Field(default="http://127.0.0.1:8000", max_length=2048)
+    draft_min_virality: float = Field(default=60.0, ge=0.0, le=100.0, allow_inf_nan=False)
+    draft_min_relevance: float = Field(default=45.0, ge=0.0, le=100.0, allow_inf_nan=False)
+    max_drafts_per_scan: int = Field(default=8, ge=1)
 
     @field_validator("dashboard_url")
     @classmethod
