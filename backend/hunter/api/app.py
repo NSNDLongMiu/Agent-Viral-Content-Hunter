@@ -1,13 +1,9 @@
 """FastAPI entry point. Startup opens the local database and recovers pending work."""
 
-import asyncio
-import logging
-import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -27,21 +23,6 @@ from hunter.state import Conflict, IntegrationUnavailable, InvalidTransition, No
 
 from . import auth, routes
 from .dependencies import Services
-
-_LOG = logging.getLogger(__name__)
-_RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
-
-
-async def _periodic_retention(retention: RetentionService, stop: asyncio.Event) -> None:
-    while not stop.is_set():
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=_RETENTION_INTERVAL_SECONDS)
-        except TimeoutError:
-            try:
-                await run_in_threadpool(retention.purge)
-            except sqlite3.Error:
-                _LOG.error("Scheduled SQLite retention failed")
-
 
 async def _domain_error(request: Request, error: Exception) -> JSONResponse:
     if isinstance(error, NotFound):
@@ -72,8 +53,7 @@ def create_app(settings: Settings | None = None, *, notifier: Notifier | None = 
         database.migrate()
         queue = PersistentQueue(database, effective.queue)
         queue.reclaim_expired()
-        retention = RetentionService(database, effective.retention)
-        retention.purge()
+        RetentionService(database, effective.retention).purge()
         application.state.auth = auth.AuthService(effective.auth)
         application.state.services = Services(
             settings=effective, database=database, queue=queue, briefs=BriefStore(database),
@@ -81,13 +61,7 @@ def create_app(settings: Settings | None = None, *, notifier: Notifier | None = 
             handoffs=HandoffService(database, budget=effective.budget), feedback=FeedbackService(database),
             operations=OperationsService(database), monitor=MonitorService(database), notifier=notifier,
         )
-        stop = asyncio.Event()
-        task = asyncio.create_task(_periodic_retention(retention, stop))
-        try:
-            yield
-        finally:
-            stop.set()
-            await task
+        yield
 
     application = FastAPI(
         title="Viral Content Hunter API",

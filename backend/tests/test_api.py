@@ -68,6 +68,7 @@ class APITests(DatabaseTestCase):
             claude = {"Authorization": f"Bearer {_FIXTURE_SERVICE_TOKEN}"}
             self.assertEqual(client.get("/briefs/inbox", headers=admin).json(), [])
             self.assertEqual(client.get(f"/briefs/{brief.id}", headers=admin).status_code, 404)
+            self.assertEqual(client.get(f"/briefs/{brief.id}/export/md", headers=admin).status_code, 404)
             self.assertEqual(client.get(f"/monitor/briefs/{brief.id}", headers=admin).status_code, 200)
             route = f"/review/{brief.id}/decision"
             data = {"action": "APPROVE", "expected_revision": 0, "reason": "  "}
@@ -78,7 +79,13 @@ class APITests(DatabaseTestCase):
             self.assertEqual([item["id"] for item in client.get("/briefs/inbox", headers=admin).json()], [brief.id])
             detail = client.get(f"/briefs/{brief.id}", headers=admin).json()
             self.assertEqual(detail["review_history"][0]["reason"], data["reason"])
-            self.assertEqual(client.get(f"/briefs/{brief.id}/export/md", headers=admin).status_code, 501)
+            markdown = client.get(f"/briefs/{brief.id}/export/md", headers=admin)
+            self.assertEqual(markdown.status_code, 200)
+            self.assertEqual(markdown.headers["content-type"], "text/markdown; charset=utf-8")
+            self.assertIn(brief.title_vi, markdown.text)
+            exported = client.get(f"/briefs/{brief.id}/export/json", headers=admin)
+            self.assertEqual(exported.headers["content-type"], "application/json")
+            self.assertEqual(exported.json(), detail["brief"])
             handoff = client.post("/handoffs", headers=admin, json={"brief_id": brief.id}).json()
             self.assertEqual(handoff["status"], "SELECTED")
             self.assertEqual(
@@ -115,6 +122,7 @@ class OpenAPITests(TestCase):
         path = Path(__file__).resolve().parents[2] / "docs" / "openapi.json"
         exported = json.loads(path.read_text(encoding="utf-8"))
         actual = create_app().openapi()
+        self.assertEqual(exported["servers"], [{"url": "/api"}])
         self.assertEqual(exported["paths"].keys(), actual["paths"].keys())
         for path, methods in actual["paths"].items():
             self.assertEqual(exported["paths"][path].keys(), methods.keys())

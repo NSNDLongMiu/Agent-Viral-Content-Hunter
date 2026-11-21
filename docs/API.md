@@ -1,6 +1,6 @@
 # Viral Content Hunter API
 
-The base URL for local development is `http://127.0.0.1:8000`. [OpenAPI JSON](openapi.json) publishes the request and response schemas used by the dashboard.
+The local server API base URL is `http://127.0.0.1:8000/api`. All paths below are relative to that base. The dashboard uses the same origin and loads its pages from `/`. The standalone `hunter.api.app.create_app()` exposes the relative paths directly for API tests. [OpenAPI JSON](openapi.json)
 
 ## Authentication and errors
 
@@ -22,8 +22,9 @@ HTTP `401` reports invalid or missing credentials, with a bearer challenge. `404
 | --- | --- |
 | `GET /briefs/inbox` | Admin. Lists approved briefs, newest update first. Accepts `priority`, `platform`, `content_type`, `discovered_after` (inclusive UTC datetime), `search` (case-insensitive title or summary substring), and pagination. |
 | `GET /briefs/{brief_id}` | Admin. Returns `{"brief": …, "review_history": […]}` for an approved brief. |
-| `GET /briefs/{brief_id}/export/{format}` | Admin. Takes `md` or `json`. Returns `501` for an approved brief until T4 implements formatting. |
+| `GET /briefs/{brief_id}/export/{format}` | Admin. Renders an approved brief as `text/markdown` for `md` or `application/json` for `json`. Returns `404` for unavailable or unapproved briefs. |
 | `GET /review/pending` | Claude. Returns pending draft snapshots, oldest update first, with pagination. |
+| `GET /review/{brief_id}` | Claude. Returns a single pending draft with its current `revision_count`. Returns `404` once the draft is no longer pending. |
 | `POST /review/{brief_id}/decision` | Claude. Takes `action`, `reason`, and `expected_revision` from the draft's `revision_count`. Actions are `APPROVE`, `REQUEST_REVISION`, and `REJECT`. Returns the stored decision and resulting status. Repeating the same decision returns the original record. |
 
 ## Jobs and source management
@@ -47,8 +48,8 @@ HTTP `401` reports invalid or missing credentials, with a bearer challenge. `404
 | `GET /handoffs` | Lists existing handoffs. Accepts `status` and pagination. A brief without a row has `handoff_status=NOT_HANDED_OFF` in its detail. |
 | `POST /handoffs` | Selects a Claude-approved brief using `{"brief_id":"…"}`. Repeated selection returns the existing row and deduplication key. |
 | `GET /handoffs/{handoff_id}` | Returns the handoff's persisted state, delivery receipt and timestamps. |
-| `POST /handoffs/{handoff_id}/send` | Takes `{"message":"…"}` and returns the updated handoff after dispatch or receipt lookup. Returns `501` until a Telegram adapter is installed. |
-| `POST /handoffs/{handoff_id}/check-ack` | Checks for an explicit recipient acknowledgement on a successful send and returns the current handoff. Returns `501` until the adapter is installed and `503` if the adapter's check is unavailable. |
+| `POST /handoffs/{handoff_id}/send` | Takes no body. Formats the approved brief in Vietnamese with a link to its dashboard detail and returns the updated handoff after dispatch or receipt lookup. Returns `501` when Telegram is unavailable. |
+| `POST /handoffs/{handoff_id}/check-ack` | Returns the current handoff, including any recipient acknowledgement recorded by the runtime poller. Returns `501` when Telegram is unavailable. |
 | `GET /feedback` | Lists feedback, newest first. Accepts `brief_id` and pagination. |
 | `POST /feedback` | Records feedback on an approved brief with `brief_id` and `action`. Actions are `good`, `irrelevant`, `duplicate`, and `bad-source`. Returns `201` with the stored record. |
 
@@ -69,5 +70,5 @@ HTTP `401` reports invalid or missing credentials, with a bearer challenge. `404
 To regenerate the OpenAPI file from the repository root after installing the package, run the following command.
 
 ```powershell
-python -c "import json; from pathlib import Path; from hunter.api.app import app; Path('docs/openapi.json').write_text(json.dumps(app.openapi(), ensure_ascii=False, indent=2) + chr(10), encoding='utf-8', newline=chr(10))"
+python -c "import json; from pathlib import Path; from hunter.api.app import create_app; schema = create_app().openapi(); schema['servers'] = [{'url': '/api'}]; Path('docs/openapi.json').write_text(json.dumps(schema, ensure_ascii=False, indent=2) + chr(10), encoding='utf-8', newline=chr(10))"
 ```

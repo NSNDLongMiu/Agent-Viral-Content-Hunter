@@ -2,10 +2,13 @@
 
 import sqlite3
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import JsonValue
 
+from hunter.briefs.render import to_json, to_markdown
 from hunter.config import BudgetSettings, QueueSettings, RetentionSettings
 from hunter.interfaces import AIHealth, Notifier
 from hunter.models import (
@@ -15,6 +18,8 @@ from hunter.models import (
 from hunter.models.common import Model, NonEmpty, UtcDatetime
 from hunter.services.brief_store import BriefDetail, BriefProgress
 from hunter.services.operations import AuditRecord, DashboardSettings, SettingKey
+from hunter.state import NotFound
+from hunter.telegram.messages import format_handoff
 
 from .auth import require_admin, require_claude
 from .dependencies import Backend, Page, Services
@@ -82,19 +87,33 @@ def brief_detail(brief_id: str, backend: Backend) -> BriefDetail:
 
 
 @briefs.get(
-    "/{brief_id}/export/{format}", status_code=501,
-    responses={501: {"description": "Brief formatting will be implemented by T4"}},
+    "/{brief_id}/export/{format}", response_class=Response,
+    responses={200: {"content": {
+        "text/markdown": {"schema": {"type": "string"}},
+        "application/json": {"schema": {"$ref": "#/components/schemas/ContentBrief"}},
+    }}},
 )
-def export_brief(brief_id: str, format: Literal["md", "json"], backend: Backend) -> None:
-    """Reserve the Markdown and JSON exports for approved briefs."""
-    backend.inbox.detail(brief_id)
-    raise HTTPException(501, f"{format} brief export will be implemented by T4")
+def export_brief(brief_id: str, format: Literal["md", "json"], backend: Backend) -> Response:
+    """Render an approved brief as Markdown or JSON."""
+    brief = backend.inbox.detail(brief_id).brief
+    if format == "md":
+        return Response(to_markdown(brief), media_type="text/markdown")
+    return Response(to_json(brief), media_type="application/json")
 
 
 @review.get("/pending")
 def pending_reviews(backend: Backend, page: Page) -> list[ContentBrief]:
     """List pending drafts, oldest first, for Claude."""
     return backend.review.pending(**page.model_dump())
+
+
+@review.get("/{brief_id}")
+def pending_review(brief_id: str, backend: Backend) -> ContentBrief:
+    """Read a single pending draft for Claude."""
+    brief = backend.briefs.detail(brief_id).brief
+    if brief.status != BriefStatus.PENDING_CLAUDE_REVIEW:
+        raise NotFound("Pending brief not found")
+    return brief
 
 
 @review.post("/{brief_id}/decision")
@@ -160,14 +179,11 @@ class HandoffSelection(Model):
     brief_id: NonEmpty
 
 
-class HandoffMessage(Model):
-    message: NonEmpty
-
-
 def _notifier(backend: Services) -> Notifier:
-    if backend.notifier is None:
-        raise HTTPException(501, "Telegram delivery will be implemented by T6")
-    return backend.notifier
+    notifier = backend.runtime_notifier() if backend.runtime_notifier else backend.notifier
+    if notifier is None:
+        raise HTTPException(501, "Telegram is unavailable. Enable runtime and Telegram and configure its credentials.")
+    return notifier
 
 
 @handoffs.get("")
@@ -188,22 +204,24 @@ def get_handoff(handoff_id: str, backend: Backend) -> Handoff:
     return backend.handoffs.get(handoff_id)
 
 
-@handoffs.post("/{handoff_id}/send", responses={501: {"description": "Telegram adapter not installed"}})
-def send_handoff(handoff_id: str, data: HandoffMessage, backend: Backend) -> Handoff:
+@handoffs.post("/{handoff_id}/send", responses={501: {"description": "Telegram is unavailable"}})
+def send_handoff(handoff_id: str, backend: Backend) -> Handoff:
     """Send or reconcile a selected handoff using its stable deduplication key."""
-    return backend.handoffs.send(handoff_id, data.message, _notifier(backend))
+    notifier = _notifier(backend)
+    handoff = backend.handoffs.get(handoff_id)
+    brief = backend.inbox.detail(handoff.brief_id).brief
+    url = f"{backend.settings.runtime.dashboard_url}/briefs/{quote(brief.id, safe='')}"
+    return backend.handoffs.send(handoff_id, format_handoff(brief, url), notifier)
 
 
 @handoffs.post(
     "/{handoff_id}/check-ack",
-    responses={
-        501: {"description": "Telegram adapter not installed"},
-        503: {"description": "Acknowledgement check unavailable"},
-    },
+    responses={501: {"description": "Telegram is unavailable"}},
 )
 def check_ack(handoff_id: str, backend: Backend) -> Handoff:
-    """Record a receipt only after the notifier confirms a recipient acknowledgement."""
-    return backend.handoffs.check_ack(handoff_id, _notifier(backend))
+    """Read the acknowledgement state recorded by the Telegram poller."""
+    _notifier(backend)
+    return backend.handoffs.get(handoff_id)
 
 
 @feedback.get("")

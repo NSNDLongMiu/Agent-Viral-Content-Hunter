@@ -318,7 +318,7 @@
           "briefs"
         ],
         "summary": "Export Brief",
-        "description": "Reserve the Markdown and JSON exports for approved briefs.",
+        "description": "Render an approved brief as Markdown or JSON.",
         "operationId": "export_brief_briefs__brief_id__export__format__get",
         "security": [
           {
@@ -350,11 +350,18 @@
           }
         ],
         "responses": {
-          "501": {
-            "description": "Brief formatting will be implemented by T4",
+          "200": {
+            "description": "Successful Response",
             "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              },
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ContentBrief"
+                }
               }
             }
           },
@@ -429,6 +436,63 @@
                     "$ref": "#/components/schemas/ContentBrief"
                   },
                   "title": "Response Pending Reviews Review Pending Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid Claude leader service token required"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "The operation conflicts with persisted state"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review/{brief_id}": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Pending Review",
+        "description": "Read a single pending draft for Claude.",
+        "operationId": "pending_review_review__brief_id__get",
+        "security": [
+          {
+            "ClaudeBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "brief_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Brief Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentBrief"
                 }
               }
             }
@@ -1304,16 +1368,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/HandoffMessage"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1335,7 +1389,7 @@
             "description": "The operation conflicts with persisted state"
           },
           "501": {
-            "description": "Telegram adapter not installed"
+            "description": "Telegram is unavailable"
           },
           "422": {
             "description": "Validation Error",
@@ -1356,7 +1410,7 @@
           "handoffs"
         ],
         "summary": "Check Ack",
-        "description": "Record a receipt only after the notifier confirms a recipient acknowledgement.",
+        "description": "Read the acknowledgement state recorded by the Telegram poller.",
         "operationId": "check_ack_handoffs__handoff_id__check_ack_post",
         "security": [
           {
@@ -1395,10 +1449,7 @@
             "description": "The operation conflicts with persisted state"
           },
           "501": {
-            "description": "Telegram adapter not installed"
-          },
-          "503": {
-            "description": "Acknowledgement check unavailable"
+            "description": "Telegram is unavailable"
           },
           "422": {
             "description": "Validation Error",
@@ -2851,21 +2902,6 @@
         ],
         "title": "Handoff"
       },
-      "HandoffMessage": {
-        "properties": {
-          "message": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Message"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "HandoffMessage"
-      },
       "HandoffSelection": {
         "properties": {
           "brief_id": {
@@ -3700,5 +3736,10 @@
         "scheme": "bearer"
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ]
 }

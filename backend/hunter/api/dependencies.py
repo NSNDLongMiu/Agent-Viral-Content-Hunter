@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -30,6 +31,7 @@ class Services:
     operations: OperationsService
     monitor: MonitorService
     notifier: Notifier | None
+    runtime_notifier: Callable[[], Notifier | None] | None = None
 
 
 def get_services(request: Request) -> Services:

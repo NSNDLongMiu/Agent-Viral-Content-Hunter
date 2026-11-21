@@ -15,6 +15,13 @@ collector = 2
 [retention]
 days = 90
 
+[runtime]
+enabled = false
+scheduler_tick_seconds = 30
+telegram_poll_seconds = 1
+dashboard_dir = "dashboard/dist"
+dashboard_url = "http://127.0.0.1:8000"
+
 [auth]
 session_ttl_seconds = 28800
 # Set admin_password_hash and claude_service_token in settings.local.toml or in

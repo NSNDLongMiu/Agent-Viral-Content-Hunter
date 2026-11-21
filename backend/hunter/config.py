@@ -6,6 +6,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
@@ -54,6 +55,28 @@ class RetentionSettings(ConfigModel):
     days: int = Field(default=90, ge=1, le=36500)
 
 
+class RuntimeSettings(ConfigModel):
+    enabled: bool = False
+    scheduler_tick_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+    telegram_poll_seconds: float = Field(default=1, gt=0, allow_inf_nan=False)
+    dashboard_dir: Path = Path("dashboard/dist")
+    dashboard_url: str = Field(default="http://127.0.0.1:8000", max_length=2048)
+
+    @field_validator("dashboard_url")
+    @classmethod
+    def check_dashboard_url(cls, value: str) -> str:
+        url = urlsplit(value)
+        port = url.port
+        if (
+            url.scheme not in ("http", "https") or not url.hostname
+            or url.username is not None or url.query or url.fragment
+            or port == 0
+            or any(character.isspace() or ord(character) < 32 for character in value)
+        ):
+            raise ValueError("Use a Dashboard base URL without credentials, a query, or a fragment")
+        return value.rstrip("/")
+
+
 class AuthSettings(ConfigModel):
     admin_password_hash: SecretStr | None = None
     claude_service_token: SecretStr | None = Field(default=None, min_length=32)
@@ -79,6 +102,7 @@ class Settings(ConfigModel):
     budget: BudgetSettings = Field(default_factory=BudgetSettings)
     queue: QueueSettings = Field(default_factory=QueueSettings)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
+    runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
 
 
@@ -103,6 +127,7 @@ def load_settings(path: Path | None = None, *, environ: Mapping[str, str] | None
             ("budget", BudgetSettings),
             ("queue", QueueSettings),
             ("retention", RetentionSettings),
+            ("runtime", RuntimeSettings),
             ("auth", AuthSettings),
         ):
             for field in model.model_fields:
@@ -125,4 +150,7 @@ def load_settings(path: Path | None = None, *, environ: Mapping[str, str] | None
         raise SettingsError(f"Invalid Hunter settings{fields}") from None
     if not settings.database_path.is_absolute():
         settings = settings.model_copy(update={"database_path": root / settings.database_path})
+    if not settings.runtime.dashboard_dir.is_absolute():
+        runtime = settings.runtime.model_copy(update={"dashboard_dir": root / settings.runtime.dashboard_dir})
+        settings = settings.model_copy(update={"runtime": runtime})
     return settings
