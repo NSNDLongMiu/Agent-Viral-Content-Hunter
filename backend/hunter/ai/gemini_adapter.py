@@ -48,7 +48,7 @@ class GeminiAdapter(CLIAdapter):
 
     def __init__(
         self, *, runner: Runner | None = None, executable: str | Path | None = None,
-        budget: BudgetSettings | None = None, model: str = "gemini-3.8-flash-high",
+        budget: BudgetSettings | None = None, model: str = "gemini-3.8-flash-low",
     ) -> None:
         super().__init__(runner=runner, executable=executable, budget=budget)
         self.model = model

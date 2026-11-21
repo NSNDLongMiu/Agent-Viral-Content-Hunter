@@ -1,5 +1,6 @@
 """GeminiBriefDrafter implementing the BriefDrafter protocol."""
 
+import math
 from collections.abc import Sequence
 from uuid import uuid4
 
@@ -44,8 +45,11 @@ def determine_verification_level(
 class GeminiBriefDrafter:
     """Produces validated Vietnamese content briefs using an injected AIWorker."""
 
-    def __init__(self, ai_worker: AIWorker) -> None:
+    def __init__(self, ai_worker: AIWorker, timeout_seconds: float = 180.0) -> None:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("Draft timeout must be positive and finite")
         self.ai_worker = ai_worker
+        self.timeout_seconds = timeout_seconds
 
     async def draft(
         self,
@@ -97,7 +101,7 @@ class GeminiBriefDrafter:
             instructions=instructions,
             input=evidence_input,
             output_schema=DRAFT_OUTPUT_SCHEMA,
-            timeout_seconds=60.0,
+            timeout_seconds=self.timeout_seconds,
         )
 
         result = await self.ai_worker.run(task)
@@ -130,7 +134,7 @@ class GeminiBriefDrafter:
                 instructions=corrective_instructions,
                 input=evidence_input,
                 output_schema=DRAFT_OUTPUT_SCHEMA,
-                timeout_seconds=60.0,
+                timeout_seconds=self.timeout_seconds,
             )
 
             retry_result = await self.ai_worker.run(retry_task)

@@ -179,6 +179,15 @@ def test_agy_success_envelope(
     assert stdin is None and "xin chào" in argv[2] and "Do not use tools" in argv[2]
 
 
+def test_agy_uses_flash_low_by_default(ai_task: AITask) -> None:
+    runner = FakeAgyRunner(RunResult(0, '{"status": "SUCCESS", "structured_output": {"ok": true}}'))
+    adapter = GeminiAdapter(executable="fixture-agy.exe", runner=runner)
+
+    assert asyncio.run(adapter.run(ai_task)).status == AIStatus.OK
+    argv, _, _, _ = runner.calls[0]
+    assert argv[argv.index("--model") + 1] == "gemini-3.8-flash-low"
+
+
 def test_analysis_prompt_has_fixed_prefix_for_dash_instructions(ai_task: AITask) -> None:
     task = ai_task.model_copy(update={"instructions": "--mode accept-edits"})
     prompt = analysis_prompt(task)

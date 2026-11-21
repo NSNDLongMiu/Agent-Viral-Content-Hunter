@@ -179,6 +179,7 @@ def test_summary_word_count_50_to_100_passes():
     brief = asyncio.run(drafter.draft([item], scores))
     assert len(brief.summary_vi.split()) == 65
     assert len(fake_worker.recorded_tasks) == 1
+    assert fake_worker.recorded_tasks[0].timeout_seconds == 180.0
 
 
 def test_summary_word_count_out_of_range_single_retry_success():
@@ -206,12 +207,19 @@ def test_summary_word_count_out_of_range_single_retry_success():
     }
 
     fake_worker = FakeAIWorker([too_short_output, valid_retry_output])
-    drafter = GeminiBriefDrafter(fake_worker)
+    timeout_seconds = 90.5
+    drafter = GeminiBriefDrafter(fake_worker, timeout_seconds=timeout_seconds)
 
     brief = asyncio.run(drafter.draft([item], scores))
     assert len(brief.summary_vi.split()) == 70
-    assert len(fake_worker.recorded_tasks) == 2
+    assert [task.timeout_seconds for task in fake_worker.recorded_tasks] == [timeout_seconds] * 2
     assert "CẢNH BÁO SỬA LỖI" in fake_worker.recorded_tasks[1].instructions
+
+
+@pytest.mark.parametrize("timeout_seconds", [0.0, -1.0, float("inf"), float("-inf"), float("nan")])
+def test_invalid_draft_timeout_is_rejected(timeout_seconds: float) -> None:
+    with pytest.raises(ValueError, match="positive and finite"):
+        GeminiBriefDrafter(FakeAIWorker(), timeout_seconds=timeout_seconds)
 
 
 def test_summary_word_count_still_invalid_after_retry_raises_error():

@@ -6,11 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from hunter.ai import GeminiAdapter
+from hunter.briefs.drafter import GeminiBriefDrafter
 from hunter.config import BudgetSettings, QueueSettings
 from hunter.db import Database
 from hunter.interfaces import AIHealth, AIResult, AIStatus, AITask
 from hunter.models import AIName, AttemptOutcome, Job, JobError, JobInput, JobStatus, QueueName, WorkerKind
 from hunter.orchestrator import MemoryGovernor, Orchestrator
+from hunter.orchestrator.worker import DEFAULT_TIMEOUTS
 from hunter.queue import PersistentQueue
 
 from .support import FixtureClock
@@ -79,6 +82,11 @@ def test_success_uses_queue_priority_and_worker_capacity(queue: PersistentQueue)
         assert queue.get(disabled.id).attempt_count == 0
 
     asyncio.run(check())
+
+
+def test_default_gemini_job_timeout_covers_two_draft_attempts() -> None:
+    drafter = GeminiBriefDrafter(GeminiAdapter())
+    assert DEFAULT_TIMEOUTS[WorkerKind.GEMINI] >= 2 * drafter.timeout_seconds
 
 
 def test_timeout_retries_three_times_then_dead(queue: PersistentQueue, clock: FixtureClock) -> None:

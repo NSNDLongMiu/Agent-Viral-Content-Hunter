@@ -21,7 +21,7 @@ JobHandler = Callable[[Job], Awaitable[JobOutcome]]
 DEFAULT_TIMEOUTS = {
     WorkerKind.CLAUDE: 120.0,
     WorkerKind.CODEX: 120.0,
-    WorkerKind.GEMINI: 120.0,
+    WorkerKind.GEMINI: 420.0,  # Initial draft, corrective retry, and job overhead.
     WorkerKind.LOCAL: 60.0,
     WorkerKind.COLLECTOR: 60.0,
 }
