@@ -14,17 +14,21 @@ from hunter.ai.cli_runner import SubprocessRunner
 from hunter.api.dependencies import Services
 from hunter.ingest import ClusterService, Ingestor, collect
 from hunter.interfaces import AIWorker, Connector
-from hunter.models import AIName, Job, JobError, Source
+from hunter.models import AIName, Job, JobError, JobStatus, QueueName, Source
 from hunter.orchestrator import Orchestrator
 from hunter.pipeline import Dependencies, DraftGate, register_all
 from hunter.scheduler import Scheduler
+from hunter.services.monitor import MonitorService
 from hunter.services.retention import RetentionService
+from hunter.state import IntegrationUnavailable
 from hunter.telegram.transport import TelegramTransport
 
 from .telegram import TelegramRuntime
 
 _LOG = logging.getLogger(__name__)
 _RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
+_SUPERVISOR_RESTART_LIMIT = 5
+_SUPERVISOR_STABLE_SECONDS = 60
 _SERVER_CREDENTIAL_NAMES = frozenset({
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "HUNTER_AUTH__CLAUDE_SERVICE_TOKEN", "HUNTER_AUTH__ADMIN_PASSWORD_HASH",
 })
@@ -58,6 +62,17 @@ async def _periodic(
             await asyncio.wait_for(stop.wait(), timeout=interval)
         except TimeoutError:
             continue
+
+
+class _RuntimeMonitor(MonitorService):
+    def __init__(self, monitor: MonitorService, orchestrator: Orchestrator) -> None:
+        super().__init__(monitor.database)
+        self._orchestrator = orchestrator
+
+    def queues(self) -> dict[QueueName, dict[JobStatus, int]]:
+        if not self._orchestrator.running:
+            raise IntegrationUnavailable("Worker supervisor unavailable")
+        return super().queues()
 
 
 class Runtime:
@@ -116,10 +131,31 @@ class Runtime:
         self.retention = RetentionService(services.database, services.settings.retention)
         self.telegram = TelegramRuntime(services, transport=telegram_transport, environ=environ)
 
+    async def _watch_workers(self) -> None:
+        loop = asyncio.get_running_loop()
+        failures = 0
+        while True:
+            started = loop.time()
+            try:
+                await self.orchestrator.run()
+            except Exception:
+                # Supervisor failures may carry SQLite diagnostics or job inputs.
+                pass
+            _LOG.error("Worker supervisor stopped unexpectedly")
+            if loop.time() - started >= _SUPERVISOR_STABLE_SECONDS:
+                failures = 0
+            if failures >= _SUPERVISOR_RESTART_LIMIT:
+                _LOG.error("Worker supervisor restart limit reached")
+                return
+            await asyncio.sleep(min(30.0, 0.5 * 2 ** failures))
+            failures += 1
+
     @asynccontextmanager
     async def lifespan(self) -> AsyncIterator[None]:
         stop = asyncio.Event()
-        await self.orchestrator.start()
+        monitor = self.services.monitor
+        self.services.monitor = _RuntimeMonitor(monitor, self.orchestrator)
+        workers = asyncio.create_task(self._watch_workers())
         self.services.runtime_notifier = self.telegram.notifier
         tasks = (
             asyncio.create_task(_periodic(
@@ -141,4 +177,9 @@ class Runtime:
         finally:
             self.services.runtime_notifier = None
             stop.set()
-            await asyncio.gather(self.orchestrator.stop(), *tasks)
+            workers.cancel()
+            try:
+                await asyncio.gather(workers, return_exceptions=True)
+                await asyncio.gather(*tasks)
+            finally:
+                self.services.monitor = monitor

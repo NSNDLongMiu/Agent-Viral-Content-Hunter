@@ -117,6 +117,10 @@ class HandoffService:
     def check_ack(self, handoff_id: str, notifier: Notifier) -> Handoff:
         """Record acknowledgement only when the adapter confirms recipient action."""
         handoff = self.get(handoff_id)
+        if handoff.status == HandoffStatus.SEND_FAILED and handoff.last_error == SendStatus.UNKNOWN:
+            handoff = self._reconcile_delivery(handoff, notifier)
+            if handoff.status == HandoffStatus.SEND_FAILED:
+                return handoff
         if handoff.status == HandoffStatus.ACKNOWLEDGED:
             return handoff
         validate_handoff_transition(handoff.status, HandoffStatus.ACKNOWLEDGED)
@@ -137,3 +141,24 @@ class HandoffService:
                 )
                 return self._get(connection, handoff_id)
         return handoff
+
+    def _reconcile_delivery(self, handoff: Handoff, notifier: Notifier) -> Handoff:
+        self.budget.require_allowed(incurs_cost=getattr(notifier, "incurs_cost", None))
+        try:
+            reported = notifier.lookup_send(handoff.dedup_key)
+            result = SendResult.model_validate(reported.model_dump())
+        except Exception:
+            raise IntegrationUnavailable("Delivery receipt lookup unavailable") from None
+        if result.status != SendStatus.SENT:
+            return handoff
+        validate_handoff_transition(handoff.status, HandoffStatus.SENT)
+        with self.database.transaction() as connection:
+            now = utc_iso(self.clock())
+            connection.execute(
+                """UPDATE handoffs SET status = 'SENT', external_id = ?, sent_at = ?, last_error = NULL,
+                   dispatch_token = NULL, dispatch_expires_at = NULL, updated_at = ?
+                   WHERE id = ? AND status = 'SEND_FAILED' AND last_error = ?
+                   AND (dispatch_token IS NULL OR dispatch_expires_at <= ?)""",
+                (result.external_id, now, now, handoff.id, SendStatus.UNKNOWN, now),
+            )
+            return self._get(connection, handoff.id)

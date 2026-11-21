@@ -131,7 +131,7 @@ def test_quota_pauses_kind_and_an_overlapping_success_cannot_unpause(
         overlap_started = asyncio.Event()
 
         async def handle(job: Job) -> AIResult | None:
-            if job.id == exhausted.id and job.attempt_count == 1:
+            if job.id == exhausted.id and job.last_error != JobError.QUOTA_EXHAUSTED:
                 await release_quota.wait()
                 return AIResult(status=AIStatus.QUOTA_EXHAUSTED, error="fixture-private-text")
             if job.id == overlap.id:
@@ -149,7 +149,7 @@ def test_quota_pauses_kind_and_an_overlapping_success_cannot_unpause(
             release_overlap.set()
             await wait_until(lambda: queue.get(overlap.id).status == JobStatus.SUCCEEDED)
             await wait_until(lambda: queue.get(other.id).status == JobStatus.SUCCEEDED)
-            clock.move(hours=1)
+            clock.move(minutes=5)
             assert queue.claim(WorkerKind.CODEX, "fixture-probe") is None
             assert queue.get(waiting.id).attempt_count == 0
             health = worker.monitor.ai()[0]

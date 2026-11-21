@@ -184,9 +184,14 @@ class TelegramRuntime:
             self._transport.poll(notifier)
         finally:
             # Reconcile durable ledger entries even when the current fetch failed.
-            for handoff in self.services.handoffs.list(status=HandoffStatus.SENT, limit=-1):
+            handoffs = self.services.handoffs
+            pending = handoffs.list(status=HandoffStatus.SENT, limit=-1) + [
+                handoff for handoff in handoffs.list(status=HandoffStatus.SEND_FAILED, limit=-1)
+                if handoff.last_error == SendStatus.UNKNOWN
+            ]
+            for handoff in pending:
                 try:
-                    self.services.handoffs.check_ack(handoff.id, notifier)
+                    handoffs.check_ack(handoff.id, notifier)
                 except NotFound:
                     continue
 

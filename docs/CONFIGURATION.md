@@ -46,6 +46,7 @@ Chính sách ngân sách được khóa cứng trong toàn bộ hệ thống:
 |---|---|---|---|---|
 | `lease_seconds` | `HUNTER_QUEUE__LEASE_SECONDS` | Số nguyên | `60` | Thời gian (giây) một worker giữ quyền xử lý một công việc. Nếu worker bị crash, sau thời gian này tác vụ sẽ tự động được thu hồi để worker khác thực thi. |
 | `retry_base_seconds` | `HUNTER_QUEUE__RETRY_BASE_SECONDS` | Số nguyên | `5` | Thời gian cơ sở (giây) cho thuật toán Exponential Backoff khi thử lại tác vụ bị lỗi tạm thời (kèm 25% jitter). |
+| `quota_cooldown_minutes` | `HUNTER_QUEUE__QUOTA_COOLDOWN_MINUTES` | Số nguyên dương | `30` | Số phút tạm dừng nhóm worker AI khi hết quota. Sau thời gian này, hàng đợi cho một tác vụ chạy thử. Nếu vẫn hết quota, thời gian chờ bắt đầu lại và tác vụ được giữ trong hàng đợi. Báo cáo xác nhận quota đã phục hồi sẽ gỡ tạm dừng ngay. |
 | `claude` | `HUNTER_QUEUE__CLAUDE` | Số nguyên | `1` | Số lượng tác vụ đồng thời dành cho Claude Reviewer. |
 | `codex` | `HUNTER_QUEUE__CODEX` | Số nguyên | `2` | Số lượng tác vụ đồng thời dành cho Codex worker. |
 | `gemini` | `HUNTER_QUEUE__GEMINI` | Số nguyên | `2` | Số lượng tác vụ đồng thời dành cho Gemini worker. |

@@ -44,6 +44,7 @@ class BudgetSettings(ConfigModel):
 class QueueSettings(ConfigModel):
     lease_seconds: int = Field(default=60, gt=0)
     retry_base_seconds: int = Field(default=5, gt=0)
+    quota_cooldown_minutes: int = Field(default=30, gt=0)
     claude: int = Field(default=1, ge=0)
     codex: int = Field(default=2, ge=0)
     gemini: int = Field(default=2, ge=0)

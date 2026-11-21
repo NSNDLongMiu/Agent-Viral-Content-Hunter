@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from hunter.config import QueueSettings
 from hunter.db import Database
+from hunter.interfaces import AIHealth, AIStatus
 from hunter.models import (
     AttemptOutcome, Job, JobAttempt, JobError, JobInput, JobLease, JobStatus, WorkerKind,
 )
@@ -64,12 +65,12 @@ class PersistentQueue:
         with self.database.transaction() as connection:
             return self._reclaim(connection, utc_iso(self.clock()))
 
-    @staticmethod
-    def _reclaim(connection: sqlite3.Connection, now: str) -> int:
+    def _reclaim(self, connection: sqlite3.Connection, now: str) -> int:
         expired = connection.execute(
             "SELECT * FROM jobs WHERE status = 'running' AND lease_expires_at <= ?", (now,)
         ).fetchall()
         for row in expired:
+            self._record_worker_outcome(connection, row, now, JobError.LEASE_EXPIRED)
             connection.execute(
                 """UPDATE job_attempts SET outcome = ?, error_code = ?, finished_at = ?
                    WHERE job_id = ? AND number = ?""",
@@ -82,6 +83,18 @@ class PersistentQueue:
             )
         return len(expired)
 
+    @staticmethod
+    def _quota_pause(connection: sqlite3.Connection, worker: WorkerKind) -> str | None:
+        row = connection.execute(
+            """SELECT checked_at FROM ai_status WHERE name = ?
+               AND (quota_exhausted = 1 OR status = 'QUOTA_EXHAUSTED')""", (worker,)
+        ).fetchone()
+        return row["checked_at"] if row else None
+
+    def _cooldown_elapsed(self, paused_at: str, now: str) -> bool:
+        elapsed = datetime.fromisoformat(now) - datetime.fromisoformat(paused_at)
+        return elapsed.total_seconds() >= self.settings.quota_cooldown_minutes * 60
+
     def claim(self, worker: WorkerKind, worker_id: str) -> JobLease | None:
         """Claim the first eligible urgent/normal job within the worker-kind capacity."""
         worker = WorkerKind(worker)
@@ -91,39 +104,47 @@ class PersistentQueue:
             instant = self.clock()
             now = utc_iso(instant)
             self._reclaim(connection, now)
-            quota_blocked = connection.execute(
-                """SELECT 1 FROM ai_status WHERE name = ?
-                   AND (quota_exhausted = 1 OR status = 'QUOTA_EXHAUSTED')""", (worker,)
-            ).fetchone()
-            if quota_blocked is not None:
+            paused_at = self._quota_pause(connection, worker)
+            if paused_at is not None and not self._cooldown_elapsed(paused_at, now):
                 return None
             running = connection.execute(
                 "SELECT count(*) FROM jobs WHERE worker = ? AND status = 'running'", (worker,)
             ).fetchone()[0]
-            if running >= getattr(self.settings, worker.value):
+            if running >= getattr(self.settings, worker.value) or (paused_at is not None and running):
                 return None
             row = connection.execute(
-                """SELECT id, status, attempt_count FROM jobs
-                   WHERE worker = ? AND status = 'queued' AND available_at <= ?
-                       AND attempt_count < ?
+                """SELECT id, status, attempt_count, last_error FROM jobs
+                   WHERE worker = ? AND available_at <= ?
+                     AND ((status = 'queued' AND attempt_count < ?)
+                          OR (status IN ('queued', 'dead') AND last_error = 'QUOTA_EXHAUSTED'
+                              AND worker <> 'collector'))
                    ORDER BY CASE queue WHEN 'urgent' THEN 0 ELSE 1 END, available_at, created_at, rowid
                    LIMIT 1""",
                 (worker, now, MAX_ATTEMPTS),
             ).fetchone()
             if row is None:
                 return None
-            validate_job_transition(JobStatus(row["status"]), JobStatus.RUNNING)
+            if row["status"] == JobStatus.DEAD:
+                # Earlier versions dead-lettered jobs that hit quota on their final attempt.
+                connection.execute("UPDATE jobs SET status = 'queued' WHERE id = ?", (row["id"],))
+            validate_job_transition(JobStatus.QUEUED, JobStatus.RUNNING)
+            # A quota rejection doesn't spend one of the job's execution attempts.
+            attempt = row["attempt_count"]
+            if worker == WorkerKind.COLLECTOR or row["last_error"] != JobError.QUOTA_EXHAUSTED:
+                attempt += 1
             token = new_id()
             expiry = utc_iso(instant + timedelta(seconds=self.settings.lease_seconds))
             claimed = connection.execute(
-                """UPDATE jobs SET status = 'running', attempt_count = attempt_count + 1,
+                """UPDATE jobs SET status = 'running', attempt_count = ?,
                    lease_token = ?, lease_expires_at = ?, updated_at = ?
                    WHERE id = ? RETURNING *""",
-                (token, expiry, now, row["id"]),
+                (attempt, token, expiry, now, row["id"]),
             ).fetchone()
             connection.execute(
-                "INSERT INTO job_attempts (job_id, number, worker_id, created_at) VALUES (?, ?, ?, ?)",
-                (row["id"], row["attempt_count"] + 1, worker_id, now),
+                """INSERT INTO job_attempts (job_id, number, worker_id, created_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(job_id, number) DO UPDATE SET worker_id = excluded.worker_id,
+                       created_at = excluded.created_at, finished_at = NULL, outcome = NULL, error_code = NULL""",
+                (row["id"], attempt, worker_id, now),
             )
             return JobLease(job=_job(claimed), token=token)
 
@@ -151,14 +172,53 @@ class PersistentQueue:
                    WHERE id = ? RETURNING *""", (expiry, now, job_id)
             ).fetchone())
 
-    def complete(self, job_id: str, token: str) -> Job:
-        return self._finish(job_id, token, None)
+    def complete(self, job_id: str, token: str, *, health: AIHealth | None = None) -> Job:
+        return self._finish(job_id, token, None, health)
 
-    def fail(self, job_id: str, token: str, error: JobError) -> Job:
+    def fail(self, job_id: str, token: str, error: JobError, *, health: AIHealth | None = None) -> Job:
         """Record a safe error code and schedule the next attempt or mark the job dead."""
-        return self._finish(job_id, token, JobError(error))
+        return self._finish(job_id, token, JobError(error), health)
 
-    def _finish(self, job_id: str, token: str, error: JobError | None) -> Job:
+    def _record_worker_outcome(
+        self, connection: sqlite3.Connection, job: sqlite3.Row, now: str,
+        error: JobError | None, health: AIHealth | None = None,
+    ) -> None:
+        worker = WorkerKind(job["worker"])
+        if worker == WorkerKind.COLLECTOR:
+            return
+        if error == JobError.QUOTA_EXHAUSTED:
+            connection.execute(
+                """INSERT INTO ai_status (name, status, available, quota_exhausted, last_error, checked_at)
+                   VALUES (?, 'QUOTA_EXHAUSTED', 0, 1, 'BLOCKED (quota)', ?)
+                   ON CONFLICT(name) DO UPDATE SET status = excluded.status, available = 0,
+                       quota_exhausted = 1, last_error = excluded.last_error, checked_at = excluded.checked_at
+                   WHERE excluded.checked_at >= ai_status.checked_at""", (worker, now)
+            )
+            return
+        paused_at = self._quota_pause(connection, worker)
+        if paused_at is not None:
+            started_at = connection.execute(
+                "SELECT created_at FROM job_attempts WHERE job_id = ? AND number = ?",
+                (job["id"], job["attempt_count"]),
+            ).fetchone()["created_at"]
+            if not self._cooldown_elapsed(paused_at, started_at):
+                # This attempt predates the current pause or an intervening health report.
+                return
+            if health is None or health.status != AIStatus.OK or not health.available or health.quota_exhausted:
+                # An inconclusive probe must wait before any other job can probe.
+                connection.execute("UPDATE ai_status SET checked_at = ? WHERE name = ?", (now, worker))
+                return
+        if health is not None:
+            connection.execute(
+                """INSERT INTO ai_status (name, status, available, quota_exhausted, last_error, checked_at)
+                   VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET
+                       status = excluded.status, available = excluded.available, quota_exhausted = excluded.quota_exhausted,
+                       last_error = excluded.last_error, checked_at = excluded.checked_at
+                   WHERE excluded.checked_at >= ai_status.checked_at""",
+                (worker, health.status, health.available, health.quota_exhausted, health.last_error, now),
+            )
+
+    def _finish(self, job_id: str, token: str, error: JobError | None, health: AIHealth | None) -> Job:
         with self.database.transaction() as connection:
             instant = self.clock()
             now = utc_iso(instant)
@@ -167,17 +227,14 @@ class PersistentQueue:
             status = failed_job_status(attempt) if error else JobStatus.SUCCEEDED
             if error == JobError.POLICY_BLOCKED:
                 status = JobStatus.DEAD
-            if error == JobError.QUOTA_EXHAUSTED and row["worker"] != WorkerKind.COLLECTOR:
-                connection.execute(
-                    """INSERT INTO ai_status (name, status, available, quota_exhausted, last_error, checked_at)
-                       VALUES (?, 'QUOTA_EXHAUSTED', 0, 1, 'BLOCKED (quota)', ?)
-                       ON CONFLICT(name) DO UPDATE SET status = excluded.status, available = 0,
-                           quota_exhausted = 1, last_error = excluded.last_error, checked_at = excluded.checked_at
-                       WHERE excluded.checked_at >= ai_status.checked_at""", (row["worker"], now)
-                )
+            elif error == JobError.QUOTA_EXHAUSTED and row["worker"] != WorkerKind.COLLECTOR:
+                status = JobStatus.QUEUED
+            self._record_worker_outcome(connection, row, now, error, health)
             validate_job_transition(JobStatus(row["status"]), status)
             available_at = now
-            if status == JobStatus.QUEUED:
+            if status == JobStatus.QUEUED and (
+                error != JobError.QUOTA_EXHAUSTED or row["worker"] == WorkerKind.COLLECTOR
+            ):
                 delay = self.settings.retry_base_seconds * 2 ** (attempt - 1)
                 available_at = utc_iso(instant + timedelta(seconds=delay * (1 + 0.25 * self.jitter())))
             connection.execute(

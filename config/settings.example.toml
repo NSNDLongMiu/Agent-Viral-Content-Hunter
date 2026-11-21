@@ -6,6 +6,8 @@ allow_paid_api = false
 [queue]
 lease_seconds = 60
 retry_base_seconds = 5
+# Số phút chờ sau khi hết quota trước khi cho một tác vụ của nhóm worker chạy thử.
+quota_cooldown_minutes = 30
 claude = 1
 codex = 2
 gemini = 2

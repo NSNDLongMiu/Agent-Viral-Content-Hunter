@@ -1,9 +1,9 @@
 """Telegram delivery and acknowledgement for one bot and chat per ledger.
 
 Telegram has no client idempotency key. A crash or ambiguous response after a
-durable reservation can leave delivery unknown indefinitely. Such keys are
-never resent. Only one consumer per bot may call getUpdates, whether directly,
-through check_ack, or from the smoke CLI.
+durable reservation can leave delivery unknown until a recipient confirms a
+handoff. Such keys are never resent. Only one consumer per bot may call
+getUpdates, whether directly, through check_ack, or from the smoke CLI.
 """
 
 import os
@@ -76,7 +76,7 @@ class TelegramNotifier(Notifier):
 
         result = self._send_reserved(message, callback_data)
         self._ledger.finish(key_hash, result)
-        return result
+        return self._ledger.lookup(key_hash) if result.status == SendStatus.UNKNOWN else result
 
     def _send_reserved(self, message: str, callback_data: str | None) -> SendResult:
         try:

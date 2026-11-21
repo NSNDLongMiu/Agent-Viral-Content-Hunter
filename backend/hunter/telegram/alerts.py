@@ -28,7 +28,7 @@ def should_alert(
 
     A backlog requires an affirmative signal recheck. The caller may supply a
     P1 score and verification decision from current evidence. The brief's
-    virality score and explicit verified labels are the defaults.
+    virality score and verification label are the defaults for an approved P1.
     """
     reasons: list[str] = []
     if brief.status != BriefStatus.APPROVED_BY_CLAUDE:
@@ -41,9 +41,7 @@ def should_alert(
     if not is_http_url(brief.original_url):
         reasons.append("source_url_not_traceable")
     if verification_satisfied is None:
-        verification_satisfied = brief.verification_level.strip().casefold() in {
-            "verified", "verified (cross-source)",
-        }
+        verification_satisfied = not brief.verification_level.strip().casefold().startswith("unverified")
     if not verification_satisfied:
         reasons.append("verification_not_satisfied")
     age = as_utc(now) - (brief.published_at or brief.discovered_at)

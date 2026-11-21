@@ -56,8 +56,20 @@ class Ledger:
     def lookup(self, key_hash: str) -> SendResult:
         with self._transaction() as db:
             row = db.execute(
-                "SELECT state, receipt FROM deliveries WHERE key_hash = ?", (key_hash,),
+                "SELECT state, receipt, callback_data FROM deliveries WHERE key_hash = ?", (key_hash,),
             ).fetchone()
+            if row is not None and row[0] == "unknown" and row[2] is not None:
+                # A callback may have committed while the send was still reserved,
+                # or before callback-based recovery was available.
+                ack = db.execute(
+                    """SELECT MIN(receipt) FROM acknowledgements WHERE callback_data = ?
+                       HAVING COUNT(*) = 1""", (row[2],),
+                ).fetchone()
+                if ack is not None:
+                    self._confirm_callback(db, ack[0], row[2])
+                    row = db.execute(
+                        "SELECT state, receipt FROM deliveries WHERE key_hash = ?", (key_hash,),
+                    ).fetchone()
         if row is None or row[0] == "reserved":
             return SendResult(status=SendStatus.UNKNOWN)
         return SendResult(status=SendStatus(row[0].upper()), external_id=row[1])
@@ -77,6 +89,15 @@ class Ledger:
             row = db.execute("SELECT next_offset FROM poll_state WHERE id = 1").fetchone()
         return row[0] if row else 0
 
+    @staticmethod
+    def _confirm_callback(db: sqlite3.Connection, receipt: str, data: str) -> None:
+        # The receipt is unique to one delivery in this chat. An existing
+        # receipt is never replaced or attached to another handoff.
+        db.execute(
+            """UPDATE OR IGNORE deliveries SET state = 'sent', receipt = ?
+               WHERE callback_data = ? AND state = 'unknown'""", (receipt, data),
+        )
+
     def apply_updates(
         self, next_offset: int, replies: list[tuple[str, bool]], callbacks: list[tuple[str, str, str]],
     ) -> list[str]:
@@ -89,9 +110,10 @@ class Ledger:
                 [(receipt, from_bot, receipt) for receipt, from_bot in replies],
             )
             for receipt, data, query_id in callbacks:
+                self._confirm_callback(db, receipt, data)
                 known = db.execute(
                     """SELECT 1 FROM deliveries WHERE callback_data = ?
-                       AND (receipt = ? OR state IN ('reserved', 'unknown'))""",
+                       AND (receipt = ? OR state = 'reserved')""",
                     (data, receipt),
                 ).fetchone()
                 if known:

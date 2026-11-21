@@ -108,7 +108,7 @@ class QueueTests(DatabaseTestCase):
         job = self.queue.enqueue(fixture_job("fixture-quota"))
         lease = self.queue.claim(WorkerKind.CODEX, "fixture-worker")
         self.assertEqual(self.queue.fail(job.id, lease.token, JobError.QUOTA_EXHAUSTED).status, JobStatus.QUEUED)
-        self.clock.move(hours=1)
+        self.clock.move(minutes=5)
         self.assertIsNone(self.queue.claim(WorkerKind.CODEX, "fixture-worker"))
         monitor = MonitorService(self.database)
         self.assertEqual(monitor.ai()[0].last_error, "BLOCKED (quota)")
@@ -116,7 +116,7 @@ class QueueTests(DatabaseTestCase):
         self.assertIsNone(self.queue.claim(WorkerKind.CODEX, "fixture-worker"))
         monitor.record_ai_health(AIHealth(name="codex", status="OK", available=True, checked_at=self.clock()))
         resumed = self.queue.claim(WorkerKind.CODEX, "fixture-worker")
-        self.assertEqual(resumed.job.attempt_count, 2)
+        self.assertEqual(resumed.job.attempt_count, 1)
         self.assertEqual(self.queue.fail(job.id, resumed.token, JobError.POLICY_BLOCKED).status, JobStatus.DEAD)
 
     def test_invalid_job_transition(self) -> None:
