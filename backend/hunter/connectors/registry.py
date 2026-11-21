@@ -6,18 +6,16 @@ from ._base import PublicConnector
 from .google_trends_vn import RSS_URL, GoogleTrendsVNConnector
 from .hacker_news import TOP_STORIES_URL, HackerNewsConnector
 from .wikimedia_top import WikimediaTopConnector
-from .youtube_channel import YouTubeChannelConnector
 
 type ConnectorFactory = Callable[..., PublicConnector]
 
 
 def available_connectors() -> dict[str, ConnectorFactory]:
-    """Factories accept the saved source ID as source_id. YouTube also requires channel_id."""
+    """Factories accept the saved source ID as source_id."""
     return {
         HackerNewsConnector.id: HackerNewsConnector,
         GoogleTrendsVNConnector.id: GoogleTrendsVNConnector,
         WikimediaTopConnector.id: WikimediaTopConnector,
-        YouTubeChannelConnector.id: YouTubeChannelConnector,
     }
 
 

@@ -9,28 +9,15 @@ from collections.abc import Sequence
 from hunter.interfaces import ConnectorError, FetchLimits
 
 from .registry import available_connectors
-from .youtube_channel import YouTubeChannelConnector
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     factories = available_connectors()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("connector", choices=tuple(factories))
-    parser.add_argument("--channel-id", help="Public YouTube channel ID (required for youtube_channel)")
     args = parser.parse_args(argv)
 
-    factory = factories[args.connector]
-    if args.connector == YouTubeChannelConnector.id:
-        if args.channel_id is None:
-            parser.error("youtube_channel requires --channel-id.")
-        try:
-            connector = factory(channel_id=args.channel_id)
-        except ValueError:
-            parser.error("A valid YouTube channel ID is required.")
-    else:
-        if args.channel_id is not None:
-            parser.error("--channel-id applies to youtube_channel only.")
-        connector = factory()
+    connector = factories[args.connector]()
 
     try:
         items = asyncio.run(connector.fetch(None, FetchLimits(max_items=3, timeout_seconds=10)))

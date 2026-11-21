@@ -16,12 +16,10 @@ from hunter.connectors.http import HttpConnectorError, HttpResponse
 from hunter.connectors.registry import available_connectors, default_sources
 from hunter.connectors.wikimedia_top import API_BASE as WIKI_API
 from hunter.connectors.wikimedia_top import WikimediaTopConnector
-from hunter.connectors.youtube_channel import FEED_URL, YouTubeChannelConnector
 from hunter.interfaces import ConnectorError, FetchLimits
 from hunter.models import ConnectorState, MetricSnapshot
 
 NOW = datetime(2026, 11, 22, 4, tzinfo=UTC)
-CHANNEL_ID = "UCabcdefghijklmnopqrstuv"
 FIXTURES = Path(__file__).with_name("fixtures") / "connectors"
 
 
@@ -192,30 +190,6 @@ def test_wikimedia_does_not_fall_back_when_the_server_requests_backoff() -> None
     assert len(fake.calls) == 1
 
 
-def test_youtube_atom_namespaces_optional_metrics_and_since_filter() -> None:
-    feed = f"{FEED_URL}?channel_id={CHANNEL_ID}"
-    fake = FakeTransport({feed: HttpResponse(200, (FIXTURES / "youtube_channel.xml").read_bytes())})
-    connector = YouTubeChannelConnector(CHANNEL_ID, transport=fake, clock=lambda: NOW)
-    first, second = asyncio.run(connector.fetch(None, FetchLimits(max_items=2)))
-
-    assert fake.calls == [(feed, 30)]
-    assert connector.dropped_items == 1
-    assert first.title == "Fixture with media statistics" and first.creator == "Fixture Channel"
-    assert first.external_id == "01Fixture_A"
-    assert str(first.source_url) == "https://www.youtube.com/watch?v=01Fixture_A"
-    assert first.published_at == datetime(2026, 11, 21, 12, tzinfo=UTC)
-    assert first.metrics == MetricSnapshot(views=0)
-    assert first.metadata == {"star_rating": {"count": 9, "average": 4.25, "min": 1, "max": 5}}
-    assert first.metrics_snapshot_at == first.fetched_at == NOW
-    assert second.external_id == "02Fixture_B"
-    assert second.metrics is None and second.metrics_snapshot_at is None
-
-    recent = asyncio.run(connector.fetch(first.published_at, FetchLimits()))
-    assert recent == [first]
-    limited = asyncio.run(connector.fetch(None, FetchLimits(max_items=1)))
-    assert limited == [first]
-
-
 def test_health_starts_unavailable_tracks_success_and_degrades_on_failure() -> None:
     now = NOW
     fake = FakeTransport({RSS_URL: HttpResponse(403, b"private response body")})
@@ -256,15 +230,12 @@ def test_feed_does_not_expand_xml_entities() -> None:
         asyncio.run(connector.fetch(None, FetchLimits()))
 
 
-def test_registry_lists_factories_and_defaults_without_instantiating_youtube() -> None:
+def test_registry_lists_factories_and_defaults_for_supported_sources() -> None:
     factories = available_connectors()
-    assert set(factories) == {"hacker_news", "google_trends_vn", "wikimedia_top", "youtube_channel"}
+    assert set(factories) == {"hacker_news", "google_trends_vn", "wikimedia_top"}
     defaults = default_sources()
     assert [source.connector_id for source in defaults] == ["hacker_news", "google_trends_vn", "wikimedia_top"]
     assert all(source.url.scheme == "https" for source in defaults)
-    assert factories["youtube_channel"](channel_id=CHANNEL_ID).id == "youtube_channel"
-    with pytest.raises(ValueError, match="valid YouTube channel ID"):
-        factories["youtube_channel"](channel_id="")
 
 
 def test_smoke_prints_counts_and_only_the_first_items_title_and_url(
