@@ -1,57 +1,63 @@
 /**
  * DTO and Data Models for Viral Content Hunter Admin Dashboard.
- * All DTO types reside in this file.
- * Any guessed schema shape is marked with // TODO(reconcile with docs/openapi.json).
+ * Reconciled against docs/openapi.json and docs/API.md.
  */
 
 // ==========================================
-// 1. Common & Health
+// 1. Common, Health & Errors
 // ==========================================
 
-// TODO(reconcile with docs/openapi.json)
-export interface HealthStatus {
-  status: 'ok' | 'degraded' | 'error';
-  version: string;
-  uptime_seconds?: number;
-  timestamp: string;
+export interface HealthResponse {
+  status: 'ok';
+}
+export type HealthStatus = HealthResponse;
+
+export interface ValidationError {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  input?: unknown;
+  ctx?: Record<string, unknown>;
 }
 
-// TODO(reconcile with docs/openapi.json)
+export interface HTTPValidationError {
+  detail?: ValidationError[];
+}
+
 export interface ApiErrorResponse {
-  message: string;
-  detail?: string | Record<string, unknown> | Array<{ loc?: string[]; msg?: string; type?: string }>;
+  message?: string;
+  detail?: string | ValidationError[] | Record<string, unknown>;
   code?: string;
 }
 
 // ==========================================
-// 2. Auth (Login / Logout / Me)
+// 2. Auth (Login / Logout / Admin Session)
 // ==========================================
 
-// TODO(reconcile with docs/openapi.json)
-export interface LoginRequest {
-  username: string;
+export interface LoginInput {
   password: string;
 }
+export type LoginRequest = LoginInput;
 
-// TODO(reconcile with docs/openapi.json)
 export interface LoginResponse {
-  success: boolean;
-  user: User;
-  token?: string; // Token optional if session cookies are used
+  access_token: string;
+  token_type: string; // 'bearer'
+  expires_in: number;
 }
 
-// TODO(reconcile with docs/openapi.json)
 export interface User {
-  id: string;
   username: string;
-  role: 'admin'; // Single admin group; no RBAC (idead.md §12)
+  role: 'admin';
 }
 
 // ==========================================
-// 3. Content Brief (idead.md §10 & Review Workflow §11)
+// 3. Content Brief (OpenAPI: ContentBrief, BriefDetail, BriefProgress)
 // ==========================================
 
-export type ReviewStatus =
+export type Priority = 'P1' | 'P2' | 'P3';
+export type PriorityLevel = Priority;
+
+export type BriefStatus =
   | 'COLLECTED'
   | 'PREPROCESSED'
   | 'PROCESSING'
@@ -60,119 +66,118 @@ export type ReviewStatus =
   | 'REVISION_REQUIRED'
   | 'REJECTED_BY_CLAUDE'
   | 'REVIEW_FAILED';
+export type ReviewStatus = BriefStatus;
 
 export type HandoffStatus =
   | 'NOT_HANDED_OFF'
   | 'SELECTED'
-  | 'SENT_TELEGRAM'
-  | 'ACKNOWLEDGED'
-  | 'SEND_FAILED';
+  | 'SENT'
+  | 'SEND_FAILED'
+  | 'ACKNOWLEDGED';
 
-export type PriorityLevel = 'P1' | 'P2' | 'P3';
+export type ReviewAction = 'APPROVE' | 'REQUEST_REVISION' | 'REJECT';
 
-export interface EngagementMetrics {
+export interface MetricSnapshot {
   views?: number | null;
   likes?: number | null;
   shares?: number | null;
   comments?: number | null;
   growth_rate?: string | null;
-  [key: string]: unknown;
 }
+export type EngagementMetrics = MetricSnapshot;
 
-export interface ScoringReasons {
-  virality?: string;
-  relevance?: string;
-  credibility?: string;
-  priority?: string;
-}
-
-export interface ReviewHistoryEntry {
-  id: string;
-  decision: ReviewStatus | string;
+export interface ReviewDecision {
+  id: number;
+  brief_id: string;
+  action: ReviewAction;
   reason: string;
-  timestamp: string;
-  reviewer: string; // e.g. "Claude Leader"
+  expected_revision: number;
+  resulting_status: BriefStatus;
+  created_at: string;
 }
 
-// TODO(reconcile with docs/openapi.json)
 export interface ContentBrief {
-  // Field 1: ID hồ sơ
   id: string;
-  // Field 2: Tiêu đề tiếng Việt
   title_vi: string;
-  // Field 3: Tiêu đề gốc
-  title_original: string;
-  // Field 4: Loại nội dung
+  original_title: string;
   content_type: string;
-  // Field 5: Nền tảng
   platform: string;
-  // Field 6: Ngôn ngữ gốc
   original_language: string;
-  // Field 7: Thời gian đăng nếu biết
-  published_at?: string | null;
-  // Field 8: Thời gian phát hiện
+  published_at: string | null;
   discovered_at: string;
-  // Field 9: Creator/tác giả nếu biết
-  author?: string | null;
-  // Field 10: Tóm tắt 50–100 từ
+  creator: string | null;
   summary_vi: string;
-  // Field 11: Lý do nội dung đáng chú ý
-  notable_reason: string;
-  // Field 12: Virality Score (0-100)
+  why_notable: string;
   virality_score: number;
-  // Field 13: Relevance Score (0-100)
   relevance_score: number;
-  // Field 14: Credibility (0-100)
-  credibility_score: number;
-  // Field 15: Priority (P1/P2/P3)
-  priority: PriorityLevel;
-  // Field 16: URL nguồn gốc
-  source_url: string;
-  // Field 17: URL nguồn liên quan
+  credibility: number;
+  priority: Priority;
+  original_url: string;
   related_urls: string[];
-  // Field 18: Chỉ số tương tác có thể thu thập
-  engagement_metrics: EngagementMetrics;
-  // Field 19: Thời điểm ghi nhận chỉ số
-  metrics_recorded_at?: string | null;
-  // Field 20: Mức độ xác minh
+  engagement_metrics: MetricSnapshot | null;
+  metrics_snapshot_at: string | null;
   verification_level: string;
-  // Field 21: Rủi ro và lưu ý
-  risks_and_notes: string;
-  // Field 22: Gợi ý định dạng khai thác
-  suggested_format: string;
-  // Field 23: Trạng thái kiểm duyệt
-  review_status: ReviewStatus;
-  // Field 24: Trạng thái bàn giao
+  risks_and_notes: string[];
+  suggested_formats: string[];
+  metadata_only: boolean;
+  metadata_note_vi: string | null;
+  score_explanation: string | null;
+  status: BriefStatus;
   handoff_status: HandoffStatus;
+  revision_count: number;
+  created_at: string;
+  updated_at: string;
 
-  // Additional metadata required by idead.md §10 & §12:
-  // If summary was generated from metadata only, show prominently
-  is_metadata_only_summary: boolean;
-  // Scores must be shown separately with reasons
-  scoring_reasons?: ScoringReasons;
-  // Review history (decisions + reasons)
-  review_history?: ReviewHistoryEntry[];
-  // Trend Cluster & Series Group associations
+  // Compatibility aliases for existing UI components
+  author?: string | null;
+  source_url?: string;
+  title_original?: string;
+  notable_reason?: string;
+  credibility_score?: number;
+  metrics_recorded_at?: string | null;
+  is_metadata_only_summary?: boolean;
+  suggested_format?: string;
+  review_status?: BriefStatus;
+  scoring_reasons?: {
+    virality?: string;
+    relevance?: string;
+    credibility?: string;
+    priority?: string;
+  };
+  review_history?: ReviewDecision[];
   cluster_id?: string | null;
   series_id?: string | null;
 }
 
-// TODO(reconcile with docs/openapi.json)
+export interface BriefDetail {
+  brief: ContentBrief;
+  review_history: ReviewDecision[];
+}
+
+export interface BriefProgress {
+  id: string;
+  status: BriefStatus;
+  revision_count: number;
+}
+
 export interface BriefFilterParams {
+  priority?: Priority;
   platform?: string;
-  topic?: string;
-  time_range?: 'today' | '24h' | '7d' | '30d' | 'all';
-  priority?: PriorityLevel | 'all';
+  content_type?: string;
+  discovered_after?: string;
   search?: string;
   limit?: number;
   offset?: number;
+  // UI filter helpers
+  topic?: string;
+  time_range?: 'today' | '24h' | '7d' | '30d' | 'all';
 }
 
 // ==========================================
-// 4. Trend Cluster & Series Group (idead.md §9)
+// 4. Trend Cluster & Series Group (idead.md §9 / API Gaps)
+// Note: Clustering and series endpoints are deferred to T4 and not published in openapi.json.
 // ==========================================
 
-// TODO(reconcile with docs/openapi.json)
 export interface TrendCluster {
   id: string;
   main_topic: string;
@@ -180,20 +185,17 @@ export interface TrendCluster {
   discovered_at: string;
   viral_signal: string;
   credible_source: string;
-  status: 'emerging' | 'active' | 'cooling' | string;
+  status: string;
   representative_brief_id: string;
-  related_brief_ids?: string[];
   briefs?: ContentBrief[];
 }
 
-// TODO(reconcile with docs/openapi.json)
 export interface SeriesEpisode {
   episode_num?: number;
   title?: string;
   url: string;
 }
 
-// TODO(reconcile with docs/openapi.json)
 export interface SeriesBrief {
   id: string;
   original_title: string;
@@ -208,101 +210,204 @@ export interface SeriesBrief {
 }
 
 // ==========================================
-// 5. Feedback (idead.md §14)
+// 5. Feedback (OpenAPI: Feedback, FeedbackInput, FeedbackAction)
 // ==========================================
 
-export type FeedbackAction = 'good' | 'irrelevant' | 'duplicate' | 'bad_source';
+export type FeedbackAction = 'good' | 'irrelevant' | 'duplicate' | 'bad-source';
 
-// TODO(reconcile with docs/openapi.json)
-export interface FeedbackRequest {
+export interface FeedbackInput {
   brief_id: string;
   action: FeedbackAction;
-  notes?: string;
+}
+export type FeedbackRequest = FeedbackInput;
+
+export interface Feedback {
+  id: number;
+  brief_id: string;
+  action: FeedbackAction;
+  created_at: string;
+}
+export type FeedbackResponse = Feedback;
+
+// ==========================================
+// 6. Handoffs (OpenAPI: Handoff, HandoffSelection, HandoffMessage)
+// ==========================================
+
+export interface HandoffSelection {
+  brief_id: string;
 }
 
-// TODO(reconcile with docs/openapi.json)
-export interface FeedbackResponse {
-  success: boolean;
+export interface HandoffMessage {
   message: string;
 }
 
-// ==========================================
-// 6. Handoffs (idead.md §13)
-// ==========================================
-
-// TODO(reconcile with docs/openapi.json)
-export interface HandoffItem {
+export interface Handoff {
   id: string;
   brief_id: string;
-  title_vi: string;
-  platform: string;
-  priority: PriorityLevel;
-  virality_score: number;
-  handoff_status: HandoffStatus;
-  sent_at?: string | null;
-  acknowledged_at?: string | null;
+  dedup_key: string;
+  status: HandoffStatus;
+  external_id: string | null;
+  last_error: string | null;
+  selected_at: string;
+  sent_at: string | null;
+  acknowledged_at: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // UI-enriched fields joined from ContentBrief
+  title_vi?: string;
+  platform?: string;
+  priority?: Priority;
+  virality_score?: number;
+  handoff_status?: HandoffStatus;
   error_message?: string | null;
   retry_count?: number;
 }
+export type HandoffItem = Handoff;
 
 // ==========================================
-// 7. Source Manager (idead.md §4.4 & §12)
+// 7. Sources (OpenAPI: Source, SourceInput, SourceChange, ConnectorHealth)
 // ==========================================
 
-export type ConnectorStatus = 'HEALTHY' | 'WARNING' | 'ERROR' | 'OFFLINE';
+export type ConnectorState = 'AVAILABLE' | 'DEGRADED' | 'BLOCKED' | 'UNAVAILABLE';
+export type ConnectorStatus = ConnectorState;
+
+export interface SourceInput {
+  connector_id: string;
+  name: string;
+  url: string;
+  platform: string;
+  enabled?: boolean;
+  blocked?: boolean;
+  priority?: number;
+  reliability?: number | null;
+  activity?: number | null;
+  content_value?: number | null;
+}
+
+export interface SourceChange {
+  reason: string;
+  source: SourceInput;
+}
+
+export interface ReasonInput {
+  reason: string;
+}
+
+export interface Source {
+  id: string;
+  connector_id: string;
+  name: string;
+  url: string;
+  platform: string;
+  enabled: boolean;
+  blocked: boolean;
+  priority: number;
+  reliability: number | null;
+  activity: number | null;
+  content_value: number | null;
+  created_at: string;
+  updated_at: string;
+
+  // UI compatibility aliases
+  is_active?: boolean;
+  is_blocked?: boolean;
+  connector_status?: ConnectorState;
+  last_scanned_at?: string | null;
+  error_count?: number;
+  error_history?: SourceErrorLog[];
+}
+export type SourceItem = Source;
 
 export interface SourceErrorLog {
   timestamp: string;
   message: string;
 }
 
-// TODO(reconcile with docs/openapi.json)
-export interface SourceItem {
-  id: string;
-  name: string;
-  platform: string;
-  url: string;
-  priority: 'high' | 'medium' | 'low';
-  is_active: boolean;
-  is_blocked: boolean;
-  connector_status: ConnectorStatus;
-  last_scanned_at?: string | null;
-  error_count: number;
-  error_history: SourceErrorLog[];
-  reliability_score?: number;
+export interface ConnectorHealth {
+  connector_id: string;
+  status: ConnectorState;
+  checked_at: string;
+  last_success_at: string | null;
+  last_error: string | null;
 }
 
 // ==========================================
-// 8. AI & System Monitor (idead.md §7 & §12)
+// 8. Jobs & System Monitor (OpenAPI: Job, JobAttempt, AIHealth)
 // ==========================================
 
-export type AIWorkerStatus = 'ONLINE' | 'OFFLINE' | 'DEGRADED' | 'RATE_LIMITED';
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'dead';
+export type WorkerKind = 'claude' | 'codex' | 'gemini' | 'local' | 'collector';
+export type QueueName = 'urgent' | 'normal';
+export type AttemptOutcome = 'succeeded' | 'failed' | 'expired';
+export type JobError =
+  | 'ERROR'
+  | 'TIMEOUT'
+  | 'UNAVAILABLE'
+  | 'AUTH_LOST'
+  | 'QUOTA_EXHAUSTED'
+  | 'LEASE_EXPIRED'
+  | 'POLICY_BLOCKED';
+
+export interface Job {
+  id: string;
+  idempotency_key: string;
+  kind: string;
+  worker: WorkerKind;
+  queue: QueueName;
+  payload?: Record<string, unknown>;
+  status: JobStatus;
+  attempt_count: number;
+  available_at: string;
+  lease_expires_at: string | null;
+  last_error: JobError | null;
+  created_at: string;
+  updated_at: string;
+
+  // UI aliases
+  task_type?: string;
+  started_at?: string;
+  retry_count?: number;
+  timeout_seconds?: number;
+}
+export type RunningJob = Job;
+
+export interface JobAttempt {
+  job_id: string;
+  number: number;
+  worker_id: string;
+  created_at: string;
+  finished_at: string | null;
+  outcome: AttemptOutcome | null;
+  error_code: JobError | null;
+}
+
+export type AIName = 'claude' | 'codex' | 'gemini' | 'local';
+export type AIStatus =
+  | 'OK'
+  | 'AUTH_LOST'
+  | 'QUOTA_EXHAUSTED'
+  | 'TIMEOUT'
+  | 'UNAVAILABLE'
+  | 'ERROR';
+export type AIWorkerStatus = AIStatus;
+
+export interface AIHealth {
+  name: AIName;
+  status: AIStatus;
+  available: boolean;
+  quota_exhausted: boolean;
+  last_error: string | null;
+  checked_at: string;
+}
 
 export interface AIWorkerInfo {
-  name: 'Claude' | 'Codex' | 'Gemini' | 'Local AI' | string;
-  status: AIWorkerStatus;
+  name: string;
+  status: AIStatus;
   active_jobs: number;
   max_jobs: number;
-  quota_status: string; // e.g., "Available", "Rate limited until 14:00"
+  quota_status: string;
   last_heartbeat: string;
-}
-
-export interface RunningJob {
-  id: string;
-  worker: string;
-  task_type: string;
-  target_id?: string;
-  started_at: string;
-  retry_count: number;
-  timeout_seconds: number;
-}
-
-export interface DeadLetterJob {
-  id: string;
-  task_type: string;
-  error: string;
-  failed_at: string;
-  retries: number;
 }
 
 export interface SystemErrorItem {
@@ -313,10 +418,9 @@ export interface SystemErrorItem {
   retry_count: number;
 }
 
-// TODO(reconcile with docs/openapi.json)
 export interface SystemMonitor {
   ai_workers: AIWorkerInfo[];
-  running_jobs: RunningJob[];
+  running_jobs: Job[];
   queues: {
     urgent: number;
     normal: number;
@@ -326,14 +430,9 @@ export interface SystemMonitor {
   retries_count: number;
   quota_errors_count: number;
   recent_errors: SystemErrorItem[];
-  dead_letter_jobs: DeadLetterJob[];
+  dead_letter_jobs: Job[];
 }
 
-// ==========================================
-// 9. Overview Stats (idead.md §12)
-// ==========================================
-
-// TODO(reconcile with docs/openapi.json)
 export interface OverviewStats {
   new_items_count: number;
   p1_candidates_count: number;
@@ -361,48 +460,64 @@ export interface OverviewStats {
 }
 
 // ==========================================
-// 10. Settings (idead.md §12 & §17)
+// 9. Settings & Audit (OpenAPI: PublicSettings, DashboardSettings, AuditRecord)
 // ==========================================
 
-export interface ScanScheduleConfig {
-  breaking_news_interval_minutes: number;
-  trending_interval_minutes: number;
-  priority_creator_interval_minutes: number;
-  normal_interval_hours: number;
-  low_activity_interval_hours: number;
-}
+export type SettingKey =
+  | 'p1_threshold'
+  | 'scan_intervals_minutes'
+  | 'priority_topics'
+  | 'excluded_topics'
+  | 'telegram_enabled';
 
-export interface JobLimitsConfig {
-  claude_sessions: number; // default 1
-  codex_max_concurrency: number; // default 2
-  gemini_max_concurrency: number; // default 2
-  local_max_concurrency: number;
-  collector_max_concurrency: number;
-}
-
-export interface TelegramConfig {
-  configured: boolean;
-  chat_id: string;
-  alert_p1_enabled: boolean;
-  handoff_enabled: boolean;
-  bot_token?: string; // WRITE-ONLY; never sent back by API!
-}
-
-export interface BudgetPolicyConfig {
-  readonly paid_apis_disabled: true; // READ-ONLY: 0 VND policy
-  readonly monthly_budget_vnd: 0; // READ-ONLY
-  readonly description: string;
-}
-
-// TODO(reconcile with docs/openapi.json)
-export interface SystemSettings {
-  p1_threshold: number; // default 85
-  scan_schedule: ScanScheduleConfig;
-  watched_sources: string[];
+export interface DashboardSettings {
+  p1_threshold: number;
+  scan_intervals_minutes?: Record<string, number>;
   priority_topics: string[];
   excluded_topics: string[];
-  telegram: TelegramConfig;
-  job_limits: JobLimitsConfig;
-  budget_policy: BudgetPolicyConfig;
-  retention_days: number; // default 90 (idead.md §18)
+  telegram_enabled: boolean;
+}
+
+export interface BudgetSettings {
+  allow_paid_api: false;
+}
+
+export interface QueueSettings {
+  lease_seconds: number;
+  retry_base_seconds: number;
+  claude: number;
+  codex: number;
+  gemini: number;
+  local: number;
+  collector: number;
+}
+
+export interface RetentionSettings {
+  days: number;
+}
+
+export interface PublicSettings {
+  preferences: DashboardSettings;
+  budget: BudgetSettings;
+  queue: QueueSettings;
+  retention: RetentionSettings;
+}
+export type SystemSettings = PublicSettings;
+
+export interface SettingChange {
+  reason: string;
+  value: unknown;
+}
+
+export interface AuditRecord {
+  id: number;
+  entity: 'source' | 'setting';
+  entity_key: string;
+  action: 'create' | 'update' | 'adjust' | 'undo';
+  actor: 'admin' | 'automation';
+  reason: string;
+  before: unknown;
+  after: unknown;
+  undoes_id: number | null;
+  created_at: string;
 }

@@ -61,7 +61,7 @@ export const MonitorPage: React.FC = () => {
               </div>
 
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-subtle)', paddingTop: '6px' }}>
-                Heartbeat: {new Date(worker.last_heartbeat).toLocaleTimeString('vi-VN')}
+                Heartbeat: {worker.last_heartbeat ? new Date(worker.last_heartbeat).toLocaleTimeString('vi-VN') : 'N/A'}
               </div>
             </div>
           ))}
@@ -133,10 +133,10 @@ export const MonitorPage: React.FC = () => {
                 <tr>
                   <th>Job ID</th>
                   <th>Worker</th>
+                  <th>Hàng đợi</th>
                   <th>Loại nhiệm vụ</th>
                   <th>Bắt đầu lúc</th>
-                  <th>Timeout</th>
-                  <th style={{ textAlign: 'center' }}>Thử lại</th>
+                  <th style={{ textAlign: 'center' }}>Số lần thử</th>
                 </tr>
               </thead>
               <tbody>
@@ -144,12 +144,12 @@ export const MonitorPage: React.FC = () => {
                   <tr key={job.id}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{job.id}</td>
                     <td><span className="badge badge-info">{job.worker}</span></td>
-                    <td>{job.task_type}</td>
+                    <td><span className="badge badge-p3">{job.queue}</span></td>
+                    <td>{job.kind}</td>
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {new Date(job.started_at).toLocaleTimeString('vi-VN')}
+                      {new Date(job.created_at).toLocaleTimeString('vi-VN')}
                     </td>
-                    <td>{job.timeout_seconds}s</td>
-                    <td style={{ textAlign: 'center' }}>{job.retry_count}</td>
+                    <td style={{ textAlign: 'center' }}>{job.attempt_count}</td>
                   </tr>
                 ))}
               </tbody>
@@ -175,6 +175,7 @@ export const MonitorPage: React.FC = () => {
               <thead>
                 <tr>
                   <th>Job ID</th>
+                  <th>Worker</th>
                   <th>Loại nhiệm vụ</th>
                   <th>Nguyên nhân lỗi</th>
                   <th>Thời điểm dừng</th>
@@ -185,12 +186,15 @@ export const MonitorPage: React.FC = () => {
                 {monitor.dead_letter_jobs.map((job) => (
                   <tr key={job.id}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{job.id}</td>
-                    <td>{job.task_type}</td>
-                    <td style={{ color: 'var(--danger-text)', fontSize: '12px' }}>{job.error}</td>
-                    <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {new Date(job.failed_at).toLocaleString('vi-VN')}
+                    <td><span className="badge badge-info">{job.worker}</span></td>
+                    <td>{job.kind}</td>
+                    <td style={{ color: 'var(--danger-text)', fontSize: '12px' }}>
+                      {job.last_error || 'POLICY_BLOCKED hoặc vượt quá số lần thử lại'}
                     </td>
-                    <td style={{ textAlign: 'center' }}>{job.retries}</td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {new Date(job.updated_at).toLocaleString('vi-VN')}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>{job.attempt_count}</td>
                   </tr>
                 ))}
               </tbody>

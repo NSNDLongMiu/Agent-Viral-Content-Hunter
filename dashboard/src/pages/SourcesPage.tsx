@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSources, toggleSource } from '../api/endpoints';
-import { SourceItem } from '../api/types';
+import { getSources, getSourceHealth, toggleSource } from '../api/endpoints';
+import { Source, ConnectorHealth } from '../api/types';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
 import { StatusBadge } from '../components/StatusBadge';
@@ -10,33 +10,44 @@ import { ConfirmModal } from '../components/ConfirmModal';
 export const SourcesPage: React.FC = () => {
   const queryClient = useQueryClient();
 
-  // Selected source to view error history
-  const [selectedSourceForErrors, setSelectedSourceForErrors] = useState<SourceItem | null>(null);
+  // Selected source to view error / diagnostic history
+  const [selectedSourceForErrors, setSelectedSourceForErrors] = useState<{
+    source: Source;
+    health?: ConnectorHealth;
+  } | null>(null);
 
   // Toggle modal
-  const [toggleConfirmSource, setToggleConfirmSource] = useState<{
-    id: string;
-    name: string;
-    currentActive: boolean;
-  } | null>(null);
+  const [toggleConfirmSource, setToggleConfirmSource] = useState<Source | null>(null);
 
   const [notification, setNotification] = useState<string | null>(null);
 
   const {
     data: sources,
-    isLoading,
-    error,
-    refetch,
+    isLoading: isSourcesLoading,
+    error: sourcesError,
+    refetch: refetchSources,
   } = useQuery({
     queryKey: ['sources'],
-    queryFn: getSources,
+    queryFn: () => getSources(),
   });
 
+  const { data: healthList } = useQuery({
+    queryKey: ['sourcesHealth'],
+    queryFn: () => getSourceHealth(),
+  });
+
+  const healthMap = React.useMemo(() => {
+    const map = new Map<string, ConnectorHealth>();
+    (healthList || []).forEach((h) => map.set(h.connector_id, h));
+    return map;
+  }, [healthList]);
+
   const toggleMutation = useMutation({
-    mutationFn: ({ id, active }: { id: string; active: boolean }) => toggleSource(id, active),
+    mutationFn: ({ source, active }: { source: Source; active: boolean }) =>
+      toggleSource(source, active),
     onSuccess: (updated) => {
       setToggleConfirmSource(null);
-      setNotification(`Đã ${updated.is_active ? 'bật' : 'tắt'} theo dõi nguồn: ${updated.name}`);
+      setNotification(`Đã ${updated.enabled ? 'bật' : 'tắt'} theo dõi nguồn: ${updated.name}`);
       setTimeout(() => setNotification(null), 3000);
       queryClient.invalidateQueries({ queryKey: ['sources'] });
     },
@@ -47,16 +58,16 @@ export const SourcesPage: React.FC = () => {
     },
   });
 
-  if (isLoading) {
+  if (isSourcesLoading) {
     return <LoadingState message="Đang tải danh sách nguồn dữ liệu..." />;
   }
 
-  if (error || !sources) {
+  if (sourcesError || !sources) {
     return (
       <ErrorState
         title="Không thể tải danh sách nguồn"
         message="Lỗi kết nối hoặc dịch vụ quản lý nguồn chưa phản hồi."
-        onRetry={() => refetch()}
+        onRetry={() => refetchSources()}
       />
     );
   }
@@ -67,24 +78,24 @@ export const SourcesPage: React.FC = () => {
       {toggleConfirmSource && (
         <ConfirmModal
           isOpen={true}
-          title={toggleConfirmSource.currentActive ? 'Tắt theo dõi nguồn' : 'Bật theo dõi nguồn'}
+          title={toggleConfirmSource.enabled ? 'Tắt theo dõi nguồn' : 'Bật theo dõi nguồn'}
           message={`Bạn có chắc muốn ${
-            toggleConfirmSource.currentActive ? 'tạm dừng quét' : 'kích hoạt lại'
+            toggleConfirmSource.enabled ? 'tạm dừng quét' : 'kích hoạt lại'
           } nguồn "${toggleConfirmSource.name}"?`}
-          confirmText={toggleConfirmSource.currentActive ? 'Tắt nguồn' : 'Bật nguồn'}
-          confirmVariant={toggleConfirmSource.currentActive ? 'danger' : 'primary'}
+          confirmText={toggleConfirmSource.enabled ? 'Tắt nguồn' : 'Bật nguồn'}
+          confirmVariant={toggleConfirmSource.enabled ? 'danger' : 'primary'}
           isLoading={toggleMutation.isPending}
           onConfirm={() =>
             toggleMutation.mutate({
-              id: toggleConfirmSource.id,
-              active: !toggleConfirmSource.currentActive,
+              source: toggleConfirmSource,
+              active: !toggleConfirmSource.enabled,
             })
           }
           onCancel={() => setToggleConfirmSource(null)}
         />
       )}
 
-      {/* Error History Modal */}
+      {/* Error / Diagnostic Modal */}
       {selectedSourceForErrors && (
         <div
           className="modal-overlay"
@@ -99,7 +110,7 @@ export const SourcesPage: React.FC = () => {
           >
             <div className="modal-header">
               <h3 style={{ margin: 0, fontSize: '16px' }}>
-                Lịch sử lỗi: {selectedSourceForErrors.name}
+                Thông tin Connector: {selectedSourceForErrors.source.name}
               </h3>
               <button
                 type="button"
@@ -110,32 +121,40 @@ export const SourcesPage: React.FC = () => {
               </button>
             </div>
             <div className="modal-body">
-              {selectedSourceForErrors.error_history.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
-                  Không có lịch sử lỗi nào được ghi nhận cho nguồn này.
-                </p>
-              ) : (
-                <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {selectedSourceForErrors.error_history.map((err, idx) => (
-                    <li
-                      key={idx}
-                      style={{
-                        padding: '8px 10px',
-                        backgroundColor: 'var(--bg-subtle)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '12px',
-                      }}
-                    >
-                      <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>
-                        {new Date(err.timestamp).toLocaleString('vi-VN')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+                <div>
+                  <strong>Mã Connector:</strong> <code>{selectedSourceForErrors.source.connector_id}</code>
+                </div>
+                <div>
+                  <strong>Trạng thái:</strong>{' '}
+                  <StatusBadge
+                    type="connector"
+                    value={selectedSourceForErrors.health?.status || 'AVAILABLE'}
+                  />
+                </div>
+                {selectedSourceForErrors.health?.last_success_at && (
+                  <div>
+                    <strong>Lần quét thành công gần nhất:</strong>{' '}
+                    {new Date(selectedSourceForErrors.health.last_success_at).toLocaleString('vi-VN')}
+                  </div>
+                )}
+                {selectedSourceForErrors.health?.last_error ? (
+                  <div className="notice-box notice-danger">
+                    <span>⚠️</span>
+                    <div>
+                      <strong>Lỗi ghi nhận gần nhất:</strong>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', marginTop: '4px' }}>
+                        {selectedSourceForErrors.health.last_error}
                       </div>
-                      <div style={{ color: 'var(--danger-text)', fontFamily: 'var(--font-mono)' }}>
-                        {err.message}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="notice-box notice-info">
+                    <span>ℹ️</span>
+                    <div>Không có lỗi nào được ghi nhận cho connector này.</div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="modal-footer">
               <button
@@ -158,7 +177,7 @@ export const SourcesPage: React.FC = () => {
             Giám sát độ tin cậy, lần quét gần nhất, tình trạng connector và lỗi kết nối
           </p>
         </div>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => refetch()}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => refetchSources()}>
           🔄 Làm mới
         </button>
       </div>
@@ -179,75 +198,64 @@ export const SourcesPage: React.FC = () => {
               <th>Nền tảng</th>
               <th>Mức ưu tiên</th>
               <th>Trạng thái Connector</th>
-              <th>Lần quét gần nhất</th>
-              <th style={{ textAlign: 'center' }}>Số lỗi</th>
+              <th style={{ textAlign: 'center' }}>Chẩn đoán</th>
               <th style={{ textAlign: 'right' }}>Thao tác</th>
             </tr>
           </thead>
           <tbody>
-            {sources.map((src) => (
-              <tr key={src.id} style={{ opacity: src.is_active ? 1 : 0.6 }}>
-                <td>
-                  <div style={{ fontWeight: 600 }}>{src.name}</div>
-                  <a
-                    href={src.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: '11px', color: 'var(--text-muted)', wordBreak: 'break-all' }}
-                  >
-                    {src.url} ↗
-                  </a>
-                </td>
-                <td>
-                  <span className="badge badge-info">{src.platform}</span>
-                </td>
-                <td>
-                  <span className="badge badge-p3">{src.priority}</span>
-                </td>
-                <td>
-                  <StatusBadge type="connector" value={src.connector_status} />
-                  {src.is_blocked && (
-                    <span className="badge badge-danger" style={{ marginLeft: '6px' }}>
-                      Bị chặn
-                    </span>
-                  )}
-                </td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  {src.last_scanned_at
-                    ? new Date(src.last_scanned_at).toLocaleString('vi-VN')
-                    : 'Chưa quét'}
-                </td>
-                <td style={{ textAlign: 'center' }}>
-                  {src.error_count > 0 ? (
+            {sources.map((src) => {
+              const health = healthMap.get(src.connector_id);
+              const connectorStatus = health?.status || (src.blocked ? 'BLOCKED' : 'AVAILABLE');
+
+              return (
+                <tr key={src.id} style={{ opacity: src.enabled ? 1 : 0.6 }}>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{src.name}</div>
+                    <a
+                      href={src.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: '11px', color: 'var(--text-muted)', wordBreak: 'break-all' }}
+                    >
+                      {src.url} ↗
+                    </a>
+                  </td>
+                  <td>
+                    <span className="badge badge-info">{src.platform}</span>
+                  </td>
+                  <td>
+                    <span className="badge badge-p3">Mức {src.priority}</span>
+                  </td>
+                  <td>
+                    <StatusBadge type="connector" value={connectorStatus} />
+                    {src.blocked && (
+                      <span className="badge badge-danger" style={{ marginLeft: '6px' }}>
+                        Bị chặn
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
                     <button
                       type="button"
-                      className="btn btn-outline-danger btn-sm"
-                      onClick={() => setSelectedSourceForErrors(src)}
-                      style={{ padding: '1px 6px', fontSize: '11px' }}
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setSelectedSourceForErrors({ source: src, health })}
+                      style={{ padding: '2px 8px', fontSize: '11px' }}
                     >
-                      {src.error_count} lỗi ℹ️
+                      {health?.last_error ? '⚠️ Xem lỗi' : 'ℹ️ Chi tiết'}
                     </button>
-                  ) : (
-                    <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>0</span>
-                  )}
-                </td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    type="button"
-                    className={`btn ${src.is_active ? 'btn-secondary' : 'btn-primary'} btn-sm`}
-                    onClick={() =>
-                      setToggleConfirmSource({
-                        id: src.id,
-                        name: src.name,
-                        currentActive: src.is_active,
-                      })
-                    }
-                  >
-                    {src.is_active ? 'Tạm dừng' : 'Kích hoạt'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      className={`btn ${src.enabled ? 'btn-secondary' : 'btn-primary'} btn-sm`}
+                      onClick={() => setToggleConfirmSource(src)}
+                    >
+                      {src.enabled ? 'Tạm dừng' : 'Kích hoạt'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

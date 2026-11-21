@@ -9,6 +9,7 @@ import {
   approveHandoff,
 } from '../api/endpoints';
 import { FeedbackAction } from '../api/types';
+import { ApiError } from '../api/client';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
 import { StatusBadge } from '../components/StatusBadge';
@@ -22,7 +23,7 @@ export const ContentDetailPage: React.FC = () => {
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
   const {
-    data: brief,
+    data: detail,
     isLoading,
     error,
     refetch,
@@ -32,13 +33,21 @@ export const ContentDetailPage: React.FC = () => {
     enabled: !!id,
   });
 
+  const brief = detail?.brief;
+  const reviewHistory = detail?.review_history || [];
+
   // Export handlers
   const handleExportMarkdown = async () => {
     if (!brief) return;
     try {
       await exportBriefMarkdown(brief.id, brief.title_vi);
-    } catch {
-      setFeedbackNotice('Không thể tải tệp Markdown.');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 501) {
+        setFeedbackNotice('Chức năng xuất Markdown đang được phát triển bởi gói T4 (501 Not Implemented).');
+      } else {
+        setFeedbackNotice('Không thể tải tệp Markdown.');
+      }
+      setTimeout(() => setFeedbackNotice(null), 4000);
     }
   };
 
@@ -46,8 +55,13 @@ export const ContentDetailPage: React.FC = () => {
     if (!brief) return;
     try {
       await exportBriefJson(brief.id, brief.title_vi);
-    } catch {
-      setFeedbackNotice('Không thể tải tệp JSON.');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 501) {
+        setFeedbackNotice('Chức năng xuất JSON đang được phát triển bởi gói T4 (501 Not Implemented).');
+      } else {
+        setFeedbackNotice('Không thể tải tệp JSON.');
+      }
+      setTimeout(() => setFeedbackNotice(null), 4000);
     }
   };
 
@@ -59,11 +73,15 @@ export const ContentDetailPage: React.FC = () => {
         good: 'Tin tốt',
         irrelevant: 'Không phù hợp',
         duplicate: 'Trùng nội dung',
-        bad_source: 'Thiếu hoặc sai nguồn',
+        'bad-source': 'Thiếu hoặc sai nguồn',
       };
       setFeedbackNotice(`Đã ghi nhận đánh giá: "${actionLabels[variables.action]}"`);
       setTimeout(() => setFeedbackNotice(null), 3000);
       queryClient.invalidateQueries({ queryKey: ['briefDetail', id] });
+    },
+    onError: () => {
+      setFeedbackNotice('Không thể gửi đánh giá phản hồi. Vui lòng thử lại.');
+      setTimeout(() => setFeedbackNotice(null), 4000);
     },
   });
 
@@ -76,9 +94,13 @@ export const ContentDetailPage: React.FC = () => {
       setTimeout(() => setFeedbackNotice(null), 4000);
       queryClient.invalidateQueries({ queryKey: ['briefDetail', id] });
     },
-    onError: () => {
+    onError: (err: unknown) => {
       setConfirmHandoffOpen(false);
-      setFeedbackNotice('Gửi bàn giao Telegram thất bại. Vui lòng kiểm tra cấu hình.');
+      if (err instanceof ApiError && err.status === 501) {
+        setFeedbackNotice('Chức năng gửi Telegram chưa cài đặt adapter Telegram (501 Not Implemented - Gói T6).');
+      } else {
+        setFeedbackNotice('Gửi bàn giao Telegram thất bại. Vui lòng kiểm tra lại trạng thái.');
+      }
       setTimeout(() => setFeedbackNotice(null), 5000);
     },
   });
@@ -135,14 +157,14 @@ export const ContentDetailPage: React.FC = () => {
       )}
 
       {/* Prominent Warning if Summary Generated from Metadata Only (idead.md §10) */}
-      {brief.is_metadata_only_summary && (
+      {brief.metadata_only && (
         <div className="notice-box notice-warning" style={{ fontSize: '14px', padding: '14px' }}>
           <span style={{ fontSize: '20px' }}>⚠️</span>
           <div>
             <strong>LƯU Ý QUAN TRỌNG:</strong> Tóm tắt nội dung này được tạo hoàn toàn từ{' '}
             <strong>metadata</strong> công khai (tiêu đề, thẻ tag, mô tả ngắn). Hệ thống chưa tải
-            hoặc phân tích toàn bộ nội dung video gốc. Vui lòng kiểm tra lại link nguồn trước khi
-            sản xuất.
+            hoặc phân tích toàn bộ nội dung video gốc.
+            {brief.metadata_note_vi && <div style={{ marginTop: '4px' }}>Ghi chú: {brief.metadata_note_vi}</div>}
           </div>
         </div>
       )}
@@ -153,14 +175,14 @@ export const ContentDetailPage: React.FC = () => {
           <div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
               <StatusBadge type="priority" value={brief.priority} />
-              <StatusBadge type="review" value={brief.review_status} />
+              <StatusBadge type="review" value={brief.status} />
               <span className="badge badge-info">{brief.platform}</span>
               <span className="badge badge-p3">Ngôn ngữ gốc: {brief.original_language}</span>
               <span className="badge badge-p3">Loại: {brief.content_type}</span>
             </div>
             <h1 style={{ fontSize: '22px', marginBottom: '4px' }}>{brief.title_vi}</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
-              Tiêu đề gốc: <em>{brief.title_original || '(Không có)'}</em>
+              Tiêu đề gốc: <em>{brief.original_title || '(Không có)'}</em>
             </p>
           </div>
 
@@ -173,9 +195,9 @@ export const ContentDetailPage: React.FC = () => {
                 Đăng tải: {new Date(brief.published_at).toLocaleString('vi-VN')}
               </div>
             )}
-            {brief.author && (
+            {brief.creator && (
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                Tác giả/Creator: <strong>{brief.author}</strong>
+                Tác giả/Creator: <strong>{brief.creator}</strong>
               </div>
             )}
           </div>
@@ -200,16 +222,22 @@ export const ContentDetailPage: React.FC = () => {
           <div className="card">
             <h3 style={{ marginBottom: '8px' }}>Lý do nội dung đáng chú ý</h3>
             <p style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-              {brief.notable_reason}
+              {brief.why_notable}
             </p>
           </div>
 
           {/* Suggested Format & Angles */}
           <div className="card">
             <h3 style={{ marginBottom: '8px' }}>Gợi ý định dạng khai thác</h3>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {brief.suggested_format || 'Chưa có gợi ý cụ thể.'}
-            </p>
+            {brief.suggested_formats && brief.suggested_formats.length > 0 ? (
+              <ul style={{ paddingLeft: '20px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                {brief.suggested_formats.map((fmt, idx) => (
+                  <li key={idx}>{fmt}</li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Chưa có gợi ý cụ thể.</p>
+            )}
           </div>
 
           {/* Verification & Risks */}
@@ -222,9 +250,17 @@ export const ContentDetailPage: React.FC = () => {
               </div>
               <div>
                 <strong>Rủi ro và lưu ý:</strong>
-                <p style={{ marginTop: '4px', color: 'var(--danger-text)' }}>
-                  {brief.risks_and_notes || 'Không phát hiện rủi ro đặc biệt.'}
-                </p>
+                {brief.risks_and_notes && brief.risks_and_notes.length > 0 ? (
+                  <ul style={{ marginTop: '4px', paddingLeft: '20px', color: 'var(--danger-text)' }}>
+                    {brief.risks_and_notes.map((risk, idx) => (
+                      <li key={idx}>{risk}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p style={{ marginTop: '4px', color: 'var(--text-secondary)' }}>
+                    Không phát hiện rủi ro đặc biệt.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -235,8 +271,8 @@ export const ContentDetailPage: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
               <div>
                 <strong>Link nguồn gốc:</strong>{' '}
-                <a href={brief.source_url} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}>
-                  {brief.source_url} ↗
+                <a href={brief.original_url} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}>
+                  {brief.original_url} ↗
                 </a>
               </div>
               {brief.related_urls && brief.related_urls.length > 0 && (
@@ -272,11 +308,6 @@ export const ContentDetailPage: React.FC = () => {
                     {brief.virality_score}/100
                   </span>
                 </div>
-                {brief.scoring_reasons?.virality && (
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    {brief.scoring_reasons.virality}
-                  </p>
-                )}
               </div>
 
               {/* Relevance */}
@@ -287,11 +318,6 @@ export const ContentDetailPage: React.FC = () => {
                     {brief.relevance_score}/100
                   </span>
                 </div>
-                {brief.scoring_reasons?.relevance && (
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    {brief.scoring_reasons.relevance}
-                  </p>
-                )}
               </div>
 
               {/* Credibility */}
@@ -299,14 +325,9 @@ export const ContentDetailPage: React.FC = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontWeight: 600 }}>Credibility Score</span>
                   <span className="badge badge-success" style={{ fontSize: '13px' }}>
-                    {brief.credibility_score}/100
+                    {brief.credibility}/100
                   </span>
                 </div>
-                {brief.scoring_reasons?.credibility && (
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    {brief.scoring_reasons.credibility}
-                  </p>
-                )}
               </div>
 
               {/* Priority */}
@@ -315,12 +336,19 @@ export const ContentDetailPage: React.FC = () => {
                   <span style={{ fontWeight: 600 }}>Mức ưu tiên</span>
                   <StatusBadge type="priority" value={brief.priority} />
                 </div>
-                {brief.scoring_reasons?.priority && (
-                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    {brief.scoring_reasons.priority}
-                  </p>
-                )}
               </div>
+
+              {/* Score Explanation */}
+              {brief.score_explanation && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border-subtle)' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Giải thích điểm:
+                  </span>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                    {brief.score_explanation}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -329,33 +357,27 @@ export const ContentDetailPage: React.FC = () => {
             <h3 style={{ marginBottom: '8px' }}>Chỉ số tương tác</h3>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
               Thời điểm ghi nhận:{' '}
-              {brief.metrics_recorded_at
-                ? new Date(brief.metrics_recorded_at).toLocaleString('vi-VN')
+              {brief.metrics_snapshot_at
+                ? new Date(brief.metrics_snapshot_at).toLocaleString('vi-VN')
                 : 'Cùng lúc phát hiện'}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Lượt xem:</span>
-                <strong>{brief.engagement_metrics.views?.toLocaleString('vi-VN') || 'N/A'}</strong>
+                <strong>{brief.engagement_metrics?.views?.toLocaleString('vi-VN') || 'N/A'}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Lượt thích:</span>
-                <strong>{brief.engagement_metrics.likes?.toLocaleString('vi-VN') || 'N/A'}</strong>
+                <strong>{brief.engagement_metrics?.likes?.toLocaleString('vi-VN') || 'N/A'}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Bình luận:</span>
-                <strong>{brief.engagement_metrics.comments?.toLocaleString('vi-VN') || 'N/A'}</strong>
+                <strong>{brief.engagement_metrics?.comments?.toLocaleString('vi-VN') || 'N/A'}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Chia sẻ:</span>
-                <strong>{brief.engagement_metrics.shares?.toLocaleString('vi-VN') || 'N/A'}</strong>
+                <strong>{brief.engagement_metrics?.shares?.toLocaleString('vi-VN') || 'N/A'}</strong>
               </div>
-              {brief.engagement_metrics.growth_rate && (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Tốc độ tăng:</span>
-                  <span className="badge badge-warning">{brief.engagement_metrics.growth_rate}</span>
-                </div>
-              )}
             </div>
           </div>
 
@@ -370,7 +392,7 @@ export const ContentDetailPage: React.FC = () => {
               className="btn btn-primary"
               style={{ width: '100%' }}
               onClick={() => setConfirmHandoffOpen(true)}
-              disabled={brief.handoff_status === 'SENT_TELEGRAM' || brief.handoff_status === 'ACKNOWLEDGED'}
+              disabled={brief.handoff_status === 'SENT' || brief.handoff_status === 'ACKNOWLEDGED'}
             >
               🚀 Phê duyệt & Bàn giao qua Telegram
             </button>
@@ -379,9 +401,9 @@ export const ContentDetailPage: React.FC = () => {
           {/* Review History */}
           <div className="card">
             <h3 style={{ marginBottom: '8px' }}>Lịch sử kiểm duyệt Claude</h3>
-            {brief.review_history && brief.review_history.length > 0 ? (
+            {reviewHistory.length > 0 ? (
               <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {brief.review_history.map((rev) => (
+                {reviewHistory.map((rev) => (
                   <li
                     key={rev.id}
                     style={{
@@ -392,12 +414,12 @@ export const ContentDetailPage: React.FC = () => {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                      <strong>{rev.reviewer}</strong>
+                      <strong>Claude Leader (#{rev.expected_revision})</strong>
                       <span style={{ color: 'var(--text-muted)' }}>
-                        {new Date(rev.timestamp).toLocaleTimeString('vi-VN')}
+                        {new Date(rev.created_at).toLocaleTimeString('vi-VN')} {new Date(rev.created_at).toLocaleDateString('vi-VN')}
                       </span>
                     </div>
-                    <div style={{ color: 'var(--text-secondary)' }}>Quyết định: {rev.decision}</div>
+                    <div style={{ color: 'var(--text-secondary)' }}>Hành động: {rev.action} → {rev.resulting_status}</div>
                     <div style={{ marginTop: '2px', color: 'var(--text-muted)' }}>Lý do: {rev.reason}</div>
                   </li>
                 ))}
@@ -437,7 +459,7 @@ export const ContentDetailPage: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => feedbackMutation.mutate({ brief_id: brief.id, action: 'bad_source' })}
+                onClick={() => feedbackMutation.mutate({ brief_id: brief.id, action: 'bad-source' })}
               >
                 ⚠️ Sai nguồn
               </button>

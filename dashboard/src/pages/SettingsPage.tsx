@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSettings, updateSettings } from '../api/endpoints';
-import { SystemSettings } from '../api/types';
+import {
+  getSettings,
+  updateSettings,
+  getSettingsAudit,
+  undoSettingsChange,
+} from '../api/endpoints';
+import { DashboardSettings, AuditRecord } from '../api/types';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -9,10 +14,10 @@ import { ConfirmModal } from '../components/ConfirmModal';
 export const SettingsPage: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const [formData, setFormData] = useState<SystemSettings | null>(null);
-  const [telegramTokenInput, setTelegramTokenInput] = useState<string>('');
+  const [formData, setFormData] = useState<DashboardSettings | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [undoRecord, setUndoRecord] = useState<AuditRecord | null>(null);
 
   const {
     data: settings,
@@ -24,20 +29,26 @@ export const SettingsPage: React.FC = () => {
     queryFn: getSettings,
   });
 
+  const { data: auditLog } = useQuery({
+    queryKey: ['settingsAudit'],
+    queryFn: () => getSettingsAudit({ limit: 10 }),
+  });
+
   useEffect(() => {
     if (settings) {
-      setFormData(settings);
+      setFormData(settings.preferences);
     }
   }, [settings]);
 
   const updateMutation = useMutation({
-    mutationFn: (updated: Partial<SystemSettings>) => updateSettings(updated),
+    mutationFn: (prefs: DashboardSettings) =>
+      updateSettings(prefs, 'Cập nhật cấu hình dashboard qua giao diện quản trị'),
     onSuccess: () => {
       setConfirmOpen(false);
-      setTelegramTokenInput(''); // Clear write-only field
       setSaveNotice('Đã lưu cấu hình hệ thống thành công!');
       setTimeout(() => setSaveNotice(null), 4000);
       queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['settingsAudit'] });
     },
     onError: () => {
       setConfirmOpen(false);
@@ -46,11 +57,28 @@ export const SettingsPage: React.FC = () => {
     },
   });
 
+  const undoMutation = useMutation({
+    mutationFn: (recordId: number) =>
+      undoSettingsChange(recordId, 'Hoàn tác thay đổi qua giao diện quản trị'),
+    onSuccess: () => {
+      setUndoRecord(null);
+      setSaveNotice('Đã hoàn tác thay đổi thành công!');
+      setTimeout(() => setSaveNotice(null), 4000);
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['settingsAudit'] });
+    },
+    onError: () => {
+      setUndoRecord(null);
+      setSaveNotice('Không thể hoàn tác thay đổi này.');
+      setTimeout(() => setSaveNotice(null), 4000);
+    },
+  });
+
   if (isLoading) {
     return <LoadingState message="Đang tải cấu hình hệ thống..." />;
   }
 
-  if (error || !formData) {
+  if (error || !formData || !settings) {
     return (
       <ErrorState
         title="Không thể tải cài đặt"
@@ -62,21 +90,10 @@ export const SettingsPage: React.FC = () => {
 
   const handleSave = () => {
     if (!formData) return;
-
-    // Prepare payload, including write-only telegram token if provided
-    const payload: Partial<SystemSettings> = {
-      ...formData,
-      telegram: {
-        ...formData.telegram,
-        ...(telegramTokenInput ? { bot_token: telegramTokenInput } : {}),
-      },
-    };
-
-    // Budget policy is read-only by design (0 VND, no paid services): never send it back.
-    delete payload.budget_policy;
-
-    updateMutation.mutate(payload);
+    updateMutation.mutate(formData);
   };
+
+  const scanIntervals = formData.scan_intervals_minutes || {};
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1000px' }}>
@@ -84,12 +101,26 @@ export const SettingsPage: React.FC = () => {
       <ConfirmModal
         isOpen={confirmOpen}
         title="Xác nhận lưu thay đổi cài đặt"
-        message="Bạn có chắc chắn muốn cập nhật các thông số vận hành của hệ thống?"
+        message="Bạn có chắc chắn muốn cập nhật các tùy chọn vận hành của hệ thống?"
         confirmText="Lưu thay đổi"
         isLoading={updateMutation.isPending}
         onConfirm={handleSave}
         onCancel={() => setConfirmOpen(false)}
       />
+
+      {/* Confirm Undo Modal */}
+      {undoRecord && (
+        <ConfirmModal
+          isOpen={true}
+          title="Xác nhận hoàn tác thay đổi"
+          message={`Bạn có chắc muốn hoàn tác thay đổi #${undoRecord.id} (${undoRecord.entity_key}: ${undoRecord.action})?`}
+          confirmText="Hoàn tác ngay"
+          confirmVariant="danger"
+          isLoading={undoMutation.isPending}
+          onConfirm={() => undoMutation.mutate(undoRecord.id)}
+          onCancel={() => setUndoRecord(null)}
+        />
+      )}
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -125,7 +156,9 @@ export const SettingsPage: React.FC = () => {
         <div className="notice-box notice-info" style={{ marginBottom: '12px' }}>
           <span>ℹ️</span>
           <div>
-            <strong>Quy tắc bất biến:</strong> {formData.budget_policy?.description || 'Hệ thống tuân thủ chính sách ngân sách phát sinh 0 VNĐ/tháng. Tuyệt đối không tự kích hoạt API trả phí theo token, proxy trả phí, captcha trả phí hoặc cloud VPS.'}
+            <strong>Quy tắc bất biến:</strong> Hệ thống tuân thủ nghiêm ngặt chính sách ngân sách phát sinh 0 VNĐ/tháng.
+            Giá trị <code>budget.allow_paid_api</code> luôn khóa ở mức <code>false</code>. Tuyệt đối không sử dụng API trả phí
+            theo lượt, proxy trả phí, dịch vụ giải mã captcha hay máy chủ đám mây tính phí.
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
@@ -144,7 +177,7 @@ export const SettingsPage: React.FC = () => {
             <input
               type="text"
               className="form-control"
-              value="Vô hiệu hóa vĩnh viễn"
+              value={settings.budget.allow_paid_api ? 'Đang bật' : 'Vô hiệu hóa vĩnh viễn (false)'}
               readOnly
               disabled
             />
@@ -154,7 +187,7 @@ export const SettingsPage: React.FC = () => {
             <input
               type="text"
               className="form-control"
-              value="Fail closed / Giảm tải chờ hồi phục"
+              value="Fail closed / Chờ hạn ngạch tự nhiên"
               readOnly
               disabled
             />
@@ -186,7 +219,7 @@ export const SettingsPage: React.FC = () => {
                 })
               }
             />
-            <div className="form-help">Mặc định: 85. Điểm từ ngưỡng này trở lên sẽ được xem xét thành P1.</div>
+            <div className="form-help">Mặc định: 85. Điểm từ ngưỡng này trở lên sẽ được đưa vào diện ưu tiên cao.</div>
           </div>
 
           <div>
@@ -197,193 +230,119 @@ export const SettingsPage: React.FC = () => {
               id="retention-days"
               type="number"
               className="form-control"
-              value={formData.retention_days}
+              value={settings.retention.days}
               readOnly
               disabled
             />
-            <div className="form-help">Mặc định 90 ngày (Cố định theo idead.md §18, tự động dọn dẹp sau 90 ngày).</div>
+            <div className="form-help">Cấu hình khởi động: {settings.retention.days} ngày (Cố định theo idead.md §18, tự động thanh lọc).</div>
           </div>
         </div>
       </div>
 
-      {/* 3. Scan Schedule (Adaptive Scheduler idead.md §5) */}
+      {/* 3. Scan Schedule (Adaptive Scheduler) */}
       <div className="card">
         <div className="card-header">
-          <h3>Lịch quét dữ liệu (Adaptive Scheduler)</h3>
+          <h3>Chu kỳ quét nguồn (Phút)</h3>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
           <div>
-            <label className="form-label">Tin nóng (Phút)</label>
+            <label className="form-label">Tin nóng (breaking_news)</label>
             <input
               type="number"
+              min="1"
               className="form-control"
-              value={formData.scan_schedule.breaking_news_interval_minutes}
+              value={scanIntervals['breaking_news'] || 10}
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  scan_schedule: {
-                    ...formData.scan_schedule,
-                    breaking_news_interval_minutes: Number(e.target.value),
+                  scan_intervals_minutes: {
+                    ...scanIntervals,
+                    breaking_news: Number(e.target.value),
                   },
                 })
               }
             />
-            <div className="form-help">Đề xuất: 5–10 phút</div>
+            <div className="form-help">Đề xuất: 5–15 phút</div>
           </div>
 
           <div>
-            <label className="form-label">Trending / Hashtag (Phút)</label>
+            <label className="form-label">Xu hướng (trending)</label>
             <input
               type="number"
+              min="1"
               className="form-control"
-              value={formData.scan_schedule.trending_interval_minutes}
+              value={scanIntervals['trending'] || 30}
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  scan_schedule: {
-                    ...formData.scan_schedule,
-                    trending_interval_minutes: Number(e.target.value),
+                  scan_intervals_minutes: {
+                    ...scanIntervals,
+                    trending: Number(e.target.value),
                   },
                 })
               }
             />
-            <div className="form-help">Đề xuất: 15–30 phút</div>
+            <div className="form-help">Đề xuất: 15–60 phút</div>
           </div>
 
           <div>
-            <label className="form-label">Creator ưu tiên (Phút)</label>
+            <label className="form-label">Kênh ưu tiên (priority_creator)</label>
             <input
               type="number"
+              min="1"
               className="form-control"
-              value={formData.scan_schedule.priority_creator_interval_minutes}
+              value={scanIntervals['priority_creator'] || 60}
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  scan_schedule: {
-                    ...formData.scan_schedule,
-                    priority_creator_interval_minutes: Number(e.target.value),
+                  scan_intervals_minutes: {
+                    ...scanIntervals,
+                    priority_creator: Number(e.target.value),
                   },
                 })
               }
             />
-            <div className="form-help">Đề xuất: 30–60 phút</div>
-          </div>
-
-          <div>
-            <label className="form-label">Nguồn thông thường (Giờ)</label>
-            <input
-              type="number"
-              className="form-control"
-              value={formData.scan_schedule.normal_interval_hours}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  scan_schedule: {
-                    ...formData.scan_schedule,
-                    normal_interval_hours: Number(e.target.value),
-                  },
-                })
-              }
-            />
-            <div className="form-help">Đề xuất: 2–4 giờ</div>
+            <div className="form-help">Đề xuất: 30–120 phút</div>
           </div>
         </div>
       </div>
 
-      {/* 4. Telegram Integration (WRITE-ONLY TOKEN per spec) */}
+      {/* 4. Telegram Integration */}
       <div className="card">
         <div className="card-header">
           <h3>Tích hợp Telegram (Cảnh báo P1 & Bàn giao)</h3>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div className="grid-2">
+          <div className="notice-box notice-info">
+            <span>🔒</span>
             <div>
-              <label className="form-label" htmlFor="telegram-token">
-                Bot Token (Write-only / Chỉ ghi)
-              </label>
-              <input
-                id="telegram-token"
-                type="password"
-                className="form-control"
-                placeholder={
-                  formData.telegram.configured
-                    ? '•••••••••••••••• (Đã cấu hình, nhập mới để đổi)'
-                    : 'Nhập Telegram Bot Token...'
-                }
-                value={telegramTokenInput}
-                onChange={(e) => setTelegramTokenInput(e.target.value)}
-                autoComplete="new-password"
-              />
-              <div className="form-help">
-                Vì an toàn bảo mật, hệ thống không bao giờ hiển thị lại token sau khi lưu.
-              </div>
-            </div>
-
-            <div>
-              <label className="form-label" htmlFor="telegram-chat-id">
-                Telegram Chat ID / Channel ID
-              </label>
-              <input
-                id="telegram-chat-id"
-                type="text"
-                className="form-control"
-                placeholder="@my_channel hoặc -100123456789"
-                value={formData.telegram.chat_id}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    telegram: {
-                      ...formData.telegram,
-                      chat_id: e.target.value,
-                    },
-                  })
-                }
-              />
+              <strong>Bảo mật Bot Token:</strong> Token Telegram và Chat ID được cấp qua biến môi trường
+              (<code>HUNTER_TELEGRAM__BOT_TOKEN</code>) khi khởi động hệ thống và không bao giờ lưu trữ
+              trong bảng tùy chọn cơ sở dữ liệu. Bảng điều khiển chỉ cho phép bật/tắt kích hoạt tính năng.
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={formData.telegram.alert_p1_enabled}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    telegram: {
-                      ...formData.telegram,
-                      alert_p1_enabled: e.target.checked,
-                    },
-                  })
-                }
-              />
-              <span>Tự động phát cảnh báo P1 qua Telegram</span>
-            </label>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={formData.telegram.handoff_enabled}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    telegram: {
-                      ...formData.telegram,
-                      handoff_enabled: e.target.checked,
-                    },
-                  })
-                }
-              />
-              <span>Cho phép bàn giao nội dung sang đội sản xuất qua Telegram</span>
-            </label>
-          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={formData.telegram_enabled}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  telegram_enabled: e.target.checked,
+                })
+              }
+            />
+            <span style={{ fontWeight: 600 }}>Kích hoạt tính năng thông báo và bàn giao qua Telegram</span>
+          </label>
         </div>
       </div>
 
-      {/* 5. Job Concurrency Limits (idead.md §7) */}
+      {/* 5. Job Concurrency Limits (Startup Queue Limits - Read Only) */}
       <div className="card">
         <div className="card-header">
-          <h3>Giới hạn tác vụ đồng thời (Job Limits)</h3>
+          <h3>Giới hạn hàng đợi & tác vụ đồng thời (Startup Queue Limits)</h3>
+          <span className="badge badge-p3">CHỈ ĐỌC</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
           <div>
@@ -391,7 +350,7 @@ export const SettingsPage: React.FC = () => {
             <input
               type="number"
               className="form-control"
-              value={formData.job_limits.claude_sessions}
+              value={settings.queue.claude}
               readOnly
               disabled
             />
@@ -399,60 +358,39 @@ export const SettingsPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="form-label">Codex Max Jobs</label>
+            <label className="form-label">Codex Concurrency</label>
             <input
               type="number"
               className="form-control"
-              value={formData.job_limits.codex_max_concurrency}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  job_limits: {
-                    ...formData.job_limits,
-                    codex_max_concurrency: Number(e.target.value),
-                  },
-                })
-              }
+              value={settings.queue.codex}
+              readOnly
+              disabled
             />
-            <div className="form-help">Mặc định: 2 jobs</div>
+            <div className="form-help">Giới hạn máy: {settings.queue.codex} jobs</div>
           </div>
 
           <div>
-            <label className="form-label">Gemini Max Jobs</label>
+            <label className="form-label">Gemini Concurrency</label>
             <input
               type="number"
               className="form-control"
-              value={formData.job_limits.gemini_max_concurrency}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  job_limits: {
-                    ...formData.job_limits,
-                    gemini_max_concurrency: Number(e.target.value),
-                  },
-                })
-              }
+              value={settings.queue.gemini}
+              readOnly
+              disabled
             />
-            <div className="form-help">Mặc định: 2 jobs</div>
+            <div className="form-help">Giới hạn máy: {settings.queue.gemini} jobs</div>
           </div>
 
           <div>
-            <label className="form-label">Collector Nguồn</label>
+            <label className="form-label">Collector Concurrency</label>
             <input
               type="number"
               className="form-control"
-              value={formData.job_limits.collector_max_concurrency}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  job_limits: {
-                    ...formData.job_limits,
-                    collector_max_concurrency: Number(e.target.value),
-                  },
-                })
-              }
+              value={settings.queue.collector}
+              readOnly
+              disabled
             />
-            <div className="form-help">Số nguồn quét song song</div>
+            <div className="form-help">Số nguồn song song</div>
           </div>
         </div>
       </div>
@@ -506,6 +444,53 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 7. Settings Audit Log */}
+      {auditLog && auditLog.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <h3>Nhật ký thay đổi cài đặt (Audit Log)</h3>
+            <span className="badge badge-info">{auditLog.length} thay đổi gần nhất</span>
+          </div>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Khóa</th>
+                  <th>Thao tác</th>
+                  <th>Tác nhân</th>
+                  <th>Lý do</th>
+                  <th style={{ textAlign: 'right' }}>Hoàn tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLog.map((record) => (
+                  <tr key={record.id}>
+                    <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {new Date(record.created_at).toLocaleString('vi-VN')}
+                    </td>
+                    <td><code>{record.entity_key}</code></td>
+                    <td><span className="badge badge-p3">{record.action}</span></td>
+                    <td>{record.actor}</td>
+                    <td style={{ fontSize: '12px' }}>{record.reason}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-sm"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() => setUndoRecord(record)}
+                      >
+                        ↩ Hoàn tác
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Save Button Bottom */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '24px' }}>

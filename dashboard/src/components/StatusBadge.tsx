@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-  PriorityLevel,
-  ReviewStatus,
+  Priority,
+  BriefStatus,
   HandoffStatus,
-  AIWorkerStatus,
-  ConnectorStatus,
+  AIStatus,
+  ConnectorState,
 } from '../api/types';
 
 interface StatusBadgeProps {
@@ -14,7 +14,7 @@ interface StatusBadgeProps {
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ type, value }) => {
   if (type === 'priority') {
-    const priority = value as PriorityLevel;
+    const priority = value as Priority;
     let badgeClass = 'badge-p3';
     if (priority === 'P1') badgeClass = 'badge-p1';
     else if (priority === 'P2') badgeClass = 'badge-p2';
@@ -23,7 +23,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ type, value }) => {
   }
 
   if (type === 'review') {
-    const status = value as ReviewStatus;
+    const status = value as BriefStatus;
     switch (status) {
       case 'APPROVED_BY_CLAUDE':
         return <span className="badge badge-success">Claude đã duyệt</span>;
@@ -46,10 +46,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ type, value }) => {
   }
 
   if (type === 'handoff') {
-    const status = value as HandoffStatus;
+    const status = value as HandoffStatus | 'SENT_TELEGRAM';
     switch (status) {
       case 'ACKNOWLEDGED':
         return <span className="badge badge-success">Đã xác nhận tiếp nhận</span>;
+      case 'SENT':
       case 'SENT_TELEGRAM':
         return <span className="badge badge-info">Đã gửi Telegram</span>;
       case 'SELECTED':
@@ -63,32 +64,43 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ type, value }) => {
   }
 
   if (type === 'ai') {
-    const status = value as AIWorkerStatus;
+    const status = value as AIStatus | string;
     switch (status) {
+      case 'OK':
       case 'ONLINE':
         return <span className="badge badge-success">Sẵn sàng</span>;
+      case 'QUOTA_EXHAUSTED':
       case 'RATE_LIMITED':
         return <span className="badge badge-warning">Hết quota (chờ)</span>;
-      case 'DEGRADED':
-        return <span className="badge badge-warning">Giảm tải</span>;
+      case 'TIMEOUT':
+        return <span className="badge badge-warning">Hết giờ (Timeout)</span>;
+      case 'AUTH_LOST':
+        return <span className="badge badge-danger">Mất phiên CLI</span>;
+      case 'ERROR':
+        return <span className="badge badge-danger">Lỗi tác vụ</span>;
+      case 'UNAVAILABLE':
       case 'OFFLINE':
       default:
-        return <span className="badge badge-danger">Ngoại tuyến</span>;
+        return <span className="badge badge-danger">Không khả dụng</span>;
     }
   }
 
   if (type === 'connector') {
-    const status = value as ConnectorStatus;
+    const status = value as ConnectorState | string;
     switch (status) {
+      case 'AVAILABLE':
       case 'HEALTHY':
-        return <span className="badge badge-success">Bình thường</span>;
+        return <span className="badge badge-success">Khả dụng</span>;
+      case 'DEGRADED':
       case 'WARNING':
-        return <span className="badge badge-warning">Cảnh báo</span>;
+        return <span className="badge badge-warning">Cảnh báo / Giảm tải</span>;
+      case 'BLOCKED':
+        return <span className="badge badge-danger">Bị chặn</span>;
+      case 'UNAVAILABLE':
       case 'ERROR':
-        return <span className="badge badge-danger">Lỗi kết nối</span>;
       case 'OFFLINE':
       default:
-        return <span className="badge badge-p3">Tạm dừng</span>;
+        return <span className="badge badge-p3">Không khả dụng</span>;
     }
   }
 

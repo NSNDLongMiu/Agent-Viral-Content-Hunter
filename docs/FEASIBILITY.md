@@ -29,7 +29,7 @@ Raw evidence: `spikes/REPORT.md`, `spikes/out/*.json`. Reproduce: `python spikes
 | TikTok oEmbed | PASS (narrow) | embed metadata for a **known** video URL | no discovery, no engagement/publish time, docs announce deprecation |
 | Reddit `.json` | BLOCKED | — | robots.txt disallows; not bypassed |
 | Weibo hot search | BLOCKED | — | 302 redirect to a gate; not followed/bypassed |
-| YouTube channel feed | FAIL | HTTP 200 but 0 items parsed | parsing issue or wrong channel id; T2 must investigate before claiming it |
+| YouTube channel feed | BLOCKED (robots) | nothing | Root cause found in T2 review: `/xml/feeds/videos.xml` is only the static PubSubHubbub topic descriptor (no entries, by design). The content feed `/feeds/videos.xml` is `Disallow`ed for `User-agent: *` in youtube.com/robots.txt, so polling it would ignore the platform's policy. Push (WebSub) needs a public callback, impossible on a local PC. No legitimate keyless path. Connector must stay disabled |
 | Douyin public page | FAIL | HTTP 200, 0 items parsed | page is not parseable without a browser/login; no legitimate free path found |
 
 **Honest conclusion on the product's two priority sources:** with free, legitimate, no-login endpoints we can **not** do viral *discovery* on TikTok or Douyin today. We can enrich a known TikTok URL via oEmbed. Do not claim a Douyin/TikTok connector is done. MVP discovery starts from HN, Google Trends VN and Wikimedia (cross-market signals), then YouTube once fixed, plus admin-supplied URLs/keywords.

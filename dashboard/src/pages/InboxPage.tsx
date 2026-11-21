@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getInboxBriefs, submitFeedback, selectForHandoff } from '../api/endpoints';
-import { BriefFilterParams, ContentBrief, FeedbackAction, PriorityLevel } from '../api/types';
+import { BriefFilterParams, ContentBrief, FeedbackAction, Priority } from '../api/types';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
@@ -16,7 +16,7 @@ export const InboxPage: React.FC = () => {
   // Filters state
   const [platform, setPlatform] = useState<string>('');
   const [topic, setTopic] = useState<string>('');
-  const [priority, setPriority] = useState<PriorityLevel | 'all'>('all');
+  const [priority, setPriority] = useState<Priority | 'all'>('all');
   const [timeRange, setTimeRange] = useState<BriefFilterParams['time_range']>('all');
   const [search, setSearch] = useState<string>('');
 
@@ -30,7 +30,7 @@ export const InboxPage: React.FC = () => {
   const filterParams: BriefFilterParams = {
     platform: platform || undefined,
     topic: topic || undefined,
-    priority,
+    priority: priority === 'all' ? undefined : priority,
     time_range: timeRange,
     search: search.trim() || undefined,
   };
@@ -53,7 +53,7 @@ export const InboxPage: React.FC = () => {
         good: 'Tin tốt',
         irrelevant: 'Không phù hợp',
         duplicate: 'Trùng nội dung',
-        bad_source: 'Thiếu hoặc sai nguồn',
+        'bad-source': 'Thiếu hoặc sai nguồn',
       };
       setActionNotice(`Đã ghi nhận đánh giá: "${actionLabels[variables.action]}"`);
       setTimeout(() => setActionNotice(null), 3000);
@@ -68,8 +68,8 @@ export const InboxPage: React.FC = () => {
   // Handoff select mutation
   const selectHandoffMutation = useMutation({
     mutationFn: selectForHandoff,
-    onSuccess: (data) => {
-      setActionNotice(`Đã chuyển hồ sơ "${data.title_vi}" vào danh sách chờ bàn giao.`);
+    onSuccess: () => {
+      setActionNotice('Đã chuyển hồ sơ vào danh sách chờ bàn giao (SELECTED).');
       setTimeout(() => setActionNotice(null), 3500);
       queryClient.invalidateQueries({ queryKey: ['inboxBriefs'] });
       queryClient.invalidateQueries({ queryKey: ['handoffs'] });
@@ -170,7 +170,7 @@ export const InboxPage: React.FC = () => {
               id="priority-select"
               className="form-control"
               value={priority}
-              onChange={(e) => setPriority(e.target.value as PriorityLevel | 'all')}
+              onChange={(e) => setPriority(e.target.value as Priority | 'all')}
             >
               <option value="all">Tất cả mức ưu tiên</option>
               <option value="P1">P1 (Ưu tiên cao nhất)</option>
@@ -303,9 +303,9 @@ export const InboxPage: React.FC = () => {
                 >
                   {brief.title_vi}
                 </Link>
-                {brief.title_original && brief.title_original !== brief.title_vi && (
+                {brief.original_title && brief.original_title !== brief.title_vi && (
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    Tiêu đề gốc: {brief.title_original}
+                    Tiêu đề gốc: {brief.original_title}
                   </div>
                 )}
               </div>
@@ -316,7 +316,7 @@ export const InboxPage: React.FC = () => {
               </p>
 
               {/* Notice if generated from metadata only */}
-              {brief.is_metadata_only_summary && (
+              {brief.metadata_only && (
                 <div className="notice-box notice-warning" style={{ padding: '6px 10px', margin: 0, fontSize: '12px' }}>
                   <span>⚠️</span>
                   <div>Tóm tắt được tạo từ metadata (chưa cào được toàn bộ nội dung gốc).</div>
@@ -345,7 +345,7 @@ export const InboxPage: React.FC = () => {
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Credibility: </span>
-                  <strong>{brief.credibility_score}/100</strong>
+                  <strong>{brief.credibility}/100</strong>
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Bàn giao: </span>
@@ -394,7 +394,7 @@ export const InboxPage: React.FC = () => {
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => handleFeedback(brief.id, 'bad_source')}
+                    onClick={() => handleFeedback(brief.id, 'bad-source')}
                     title="Nguồn thiếu chính xác hoặc sai lệch"
                   >
                     ⚠️ Thiếu/sai nguồn

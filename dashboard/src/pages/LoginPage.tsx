@@ -8,7 +8,6 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -23,8 +22,8 @@ export const LoginPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password) {
-      setError('Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.');
+    if (!password) {
+      setError('Vui lòng nhập mật khẩu quản trị.');
       return;
     }
 
@@ -32,14 +31,15 @@ export const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      await login({ username: username.trim(), password });
+      // POST /auth/login accepts {"password": "..."}
+      await login({ password });
       const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError('Đăng nhập không thành công. Vui lòng kiểm tra lại thông tin.');
+        setError('Đăng nhập không thành công. Vui lòng kiểm tra lại mật khẩu.');
       }
     } finally {
       setIsSubmitting(false);
@@ -84,24 +84,21 @@ export const LoginPage: React.FC = () => {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label" htmlFor="username">
-              Tên đăng nhập
+              Tài khoản quản trị
             </label>
             <input
               id="username"
               type="text"
               className="form-control"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin"
-              disabled={isSubmitting}
-              autoComplete="username"
-              required
+              value="admin"
+              disabled
+              readOnly
             />
           </div>
 
           <div className="form-group" style={{ marginBottom: '20px' }}>
             <label className="form-label" htmlFor="password">
-              Mật khẩu
+              Mật khẩu quản trị (Admin Password)
             </label>
             <input
               id="password"
@@ -109,10 +106,11 @@ export const LoginPage: React.FC = () => {
               className="form-control"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="Nhập mật khẩu..."
               disabled={isSubmitting}
               autoComplete="current-password"
               required
+              autoFocus
             />
           </div>
 
