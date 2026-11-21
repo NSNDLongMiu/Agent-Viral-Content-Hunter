@@ -10,7 +10,7 @@ Raw evidence: `spikes/REPORT.md`, `spikes/out/*.json`. Reproduce: `python spikes
 |---|---|---|---|
 | E1 | AI CLI non-interactive | Codex PASS · Gemini(`agy`) PASS with caveats · Claude NOT TESTED | see below |
 | E2 | Public sources | 4 PASS, 2 FAIL, 2 BLOCKED | real data from HN, Google Trends VN, Wikimedia, TikTok oEmbed (known URL only) |
-| E3 | Telegram | BLOCKED | needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` from the user |
+| E3 | Telegram | PASS (send path) | real `sendMessage` returned a receipt for the configured private chat; `getMe` confirmed the same bot; re-run suppressed the duplicate. NOT yet verified: that the user saw it, and the "acknowledged" flow (inline button / reply) |
 | E4 | Queue crash recovery | PASS | `taskkill /F` and `/F /T`: 4 jobs retained, 3 unique completions, 1 dead letter, lease reclaimed |
 | E5 | Host / local AI | PASS (survey) | no local runtime installed -> **rule-based fallback for MVP** |
 
@@ -38,5 +38,5 @@ Raw evidence: `spikes/REPORT.md`, `spikes/out/*.json`. Reproduce: `python spikes
 1. Build the SQLite persistent queue (WAL, leases, fenced, backoff, dead letter) — validated by E4.
 2. First connectors: Hacker News, Google Trends VN, Wikimedia. TikTok oEmbed = enrichment only. YouTube after a fix.
 3. Rule-based normalisation, dedup and scoring first; AI only for summary/translation/review.
-4. Telegram needs user credentials before it can be verified.
+4. Telegram: credentials live only in the git-ignored `.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Send path verified. "Sent" is not "acknowledged": T6 must implement acknowledgement via an inline button or reply and keep ambiguous sends pending rather than resending (Telegram has no client idempotency key).
 5. Gemini calls go through `agy` with the empty-response/`denied_actions` guard; Codex calls through the companion.

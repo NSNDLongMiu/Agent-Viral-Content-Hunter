@@ -1,13 +1,13 @@
 # T0 Feasibility Spike
 
-Completed 2026-11-21T17:04:39+00:00.
+Completed 2026-11-21T17:16:26+00:00.
 Reproduce from the repository root with `python spikes/run_all.py` (standard library only).
 
 | Experiment | Verdict | Checks |
 | --- | --- | --- |
 | E1 AI CLI structured output | BLOCKED | 3 BLOCKED |
 | E2 Public-source feasibility | PASS | 4 PASS, 2 FAIL, 2 BLOCKED |
-| E3 Telegram Bot API | BLOCKED | 1 BLOCKED |
+| E3 Telegram Bot API | PASS | 1 PASS |
 | E4 Windows queue crash recovery | PASS | 2 PASS |
 | E5 Host and local AI survey | PASS | 1 PASS |
 
@@ -28,7 +28,7 @@ E1 and E2 summarize whether at least one integration passed. Individual verdicts
 | E2 Weibo | BLOCKED | HTTP 302, 0 saved item(s). HTTP 302 other redirect; redirect left unfollowed. [Evidence and endpoints](out/e2_weibo.json). | No 429 or rate headers observed. Public hot-search page only, gated by [robots.txt](https://s.weibo.com/robots.txt). No documented anonymous hot-search API was assumed. | Defer until verified. |
 | E2 TikTok | PASS | HTTP 200, 1 saved item(s). Usable public metadata returned. [Evidence and endpoints](out/e2_tiktok.json). | No 429 or rate headers observed. [Documented oEmbed](https://developers.tiktok.com/docs/en/embed-videos) for one known video URL. The documentation announces deprecation. oEmbed has no discovery, publish time or engagement guarantee. | Use for metadata enrichment of known URLs. |
 | E2 Douyin | FAIL | HTTP 200, 200, 0 saved item(s). No usable items parsed from the response. [Evidence and endpoints](out/e2_douyin.json). | No 429 or rate headers observed. One public video page gated by [robots.txt](https://www.douyin.com/robots.txt). The [developer hot-search API](https://open.douyin.com/platform/resource/docs/openapi/data-open-service/hot-video-data/get-ascending-words/) requires authorization and was left untouched. | Defer until verified. |
-| E3 Telegram | BLOCKED | Needs user credentials. No Bot API requests were made. Local SQLite check suppressed pending and sent duplicates. [Evidence](out/e3_telegram.json). | Durably reserve one test key per bot/chat before sending. Keep ambiguous sends pending for manual review. Telegram sendMessage has no client idempotency key, so a crash between reservation and confirmation can leave the test undelivered without a retry. An API receipt does not establish that a recipient read the message. | Verify with a dedicated test bot before enabling Telegram alerts. |
+| E3 Telegram | PASS | Existing API-confirmed send in ledger. This run confirmed the bot and suppressed a duplicate. Local SQLite check suppressed pending and sent duplicates. [Evidence](out/e3_telegram.json). | Durably reserve one test key per bot/chat before sending. Keep ambiguous sends pending for manual review. Telegram sendMessage has no client idempotency key, so a crash between reservation and confirmation can leave the test undelivered without a retry. An API receipt does not establish that a recipient read the message. | Verify with a dedicated test bot before enabling Telegram alerts. |
 | E4 Windows queue recovery (worker process) | PASS | taskkill exit 0. taskkill /F killed the process. Killed root exit 1, restart exit 0. 4 jobs retained, 3 unique completions, 1 dead letter. Lease reclaimed. See [evidence](out/e4_worker.json). | Forced process termination. SQLite effects share the completion transaction. Power loss and external side effects were unverified. | Use WAL, fenced leases, backoff and dead letters for the MVP queue. |
 | E4 Windows queue recovery (process tree) | PASS | taskkill exit 0. taskkill /F /T killed the process tree. Killed root exit 1, restart exit 0. 4 jobs retained, 3 unique completions, 1 dead letter. Lease reclaimed. See [evidence](out/e4_tree.json). | Forced process termination. SQLite effects share the completion transaction. Power loss and external side effects were unverified. | Use WAL, fenced leases, backoff and dead letters for the MVP queue. |
 | E5 Host resources | PASS | Windows 11 10.0.26200, 10 physical / 16 logical cores, 31.8 GiB RAM, AMD Radeon RX 6600, 21.3 GiB free on the workspace drive, no local AI runtime detected. [Evidence](out/e5_resources.json). | The runtime check covers PATH and common Windows installation paths. GPU inference, VRAM and model throughput are unverified. The measured RAM and disk make a small quantized model a candidate for later benchmarking. [Ollama hardware notes](https://ollama.com/blog/improved-performance-and-model-support-with-gguf). | Use rule-based fallback for the MVP. Reassess local inference after a separate model and runtime benchmark. |
