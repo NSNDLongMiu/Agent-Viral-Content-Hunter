@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written Google Trends RSS fixture. -->
+<rss version="2.0" xmlns:ht="https://trends.google.com/trends/trendingsearches/daily">
+  <channel>
+    <title>Trending Searches</title>
+    <item><title> </title><pubDate>Sat, 21 Nov 2026 08:00:00 -0800</pubDate></item>
+    <item>
+      <title>Mưa sao băng</title>
+      <ht:approx_traffic>2,000+</ht:approx_traffic>
+      <pubDate>Sat, 21 Nov 2026 09:00:00 -0800</pubDate>
+      <ht:news_item>
+        <ht:news_item_title>Fixture sky watch</ht:news_item_title>
+        <ht:news_item_url>https://example.com/science?id=40</ht:news_item_url>
+        <ht:news_item_source>Fixture News</ht:news_item_source>
+      </ht:news_item>
+      <ht:news_item>
+        <ht:news_item_title>Fixture event listing</ht:news_item_title>
+        <ht:news_item_url>https://example.org/events/sky</ht:news_item_url>
+      </ht:news_item>
+    </item>
+    <item>
+      <title>Lễ hội</title>
+      <pubDate>Sat, 21 Nov 2026 16:00:00 -0000</pubDate>
+      <ht:news_item>
+        <ht:news_item_url>https://example.com/news#id_token=fixture-private</ht:news_item_url>
+      </ht:news_item>
+    </item>
+    <item><title>Mưa sao băng</title></item>
+  </channel>
+</rss>
