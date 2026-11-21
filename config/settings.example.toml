@@ -1,0 +1,21 @@
+database_path = "backend/data/hunter.sqlite3"
+
+[budget]
+allow_paid_api = false
+
+[queue]
+lease_seconds = 60
+retry_base_seconds = 5
+claude = 1
+codex = 2
+gemini = 2
+collector = 2
+# local is derived from the available CPU count when omitted.
+
+[retention]
+days = 90
+
+[auth]
+session_ttl_seconds = 28800
+# Set admin_password_hash and claude_service_token in settings.local.toml or in
+# HUNTER_AUTH__ADMIN_PASSWORD_HASH and HUNTER_AUTH__CLAUDE_SERVICE_TOKEN.
