@@ -1,4 +1,4 @@
-# Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Installs Viral Content Hunter on Windows 11.
@@ -11,6 +11,9 @@
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path "$PSScriptRoot" 'provider-environment.ps1')
+Clear-HunterProviderEnvironment
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path

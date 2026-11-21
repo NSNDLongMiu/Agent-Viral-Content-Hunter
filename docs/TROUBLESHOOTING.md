@@ -124,6 +124,10 @@ Stop-Process -Id $conn.OwningProcess -Force
 
 Sau khi giải phóng cổng, chạy lại `start-hunter.ps1`.
 
+### File PID cũ sau sự cố hoặc nâng cấp
+
+Thông báo `STALE PID file` cho biết `stop-hunter.ps1` đã dọn file có thông tin tiến trình không còn khớp hoặc file định dạng cũ chỉ chứa số PID. Thao tác dọn file không gửi tín hiệu dừng tới tiến trình ghi trong file đó. Nếu phiên Hunter cũ vẫn chạy, đóng phiên PowerShell đã khởi động Hunter hoặc xác minh tiến trình giữ cổng 8000 trước khi dừng thủ công.
+
 ---
 
 ## 6. Lỗi Dashboard 404 hoặc không tìm thấy `/api`

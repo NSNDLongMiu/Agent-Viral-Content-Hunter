@@ -1,4 +1,4 @@
-# Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Starts Viral Content Hunter with supervisor restart loop on Windows.
@@ -23,8 +23,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+. (Join-Path "$PSScriptRoot" 'provider-environment.ps1')
+Clear-HunterProviderEnvironment
+. (Join-Path "$PSScriptRoot" 'process-record.ps1')
+
+$ProjectRoot = (Resolve-Path -LiteralPath (Join-Path "$PSScriptRoot" '..\..')).Path
 
 $logsDir = Join-Path $ProjectRoot "logs"
 $pidFile = Join-Path $logsDir "hunter.pid"
@@ -50,28 +53,21 @@ function Write-HunterLog {
 }
 
 # 1. Refuse to start a second instance
-if (Test-Path -LiteralPath $pidFile) {
-    $existingPidRaw = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $existingPidRaw) {
-        $existingPidStr = $existingPidRaw.ToString().Trim()
-        if ($existingPidStr -match '^\d+$') {
-            $existingPid = [int]$existingPidStr
-            $runningProc = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
-            if ($null -ne $runningProc) {
-                Write-Error "Viral Content Hunter is already running with PID $existingPid. Refusing to start a second instance."
-                exit 1
-            }
-        }
+$existingRecord = Read-HunterPidRecord -PidFile $pidFile
+if ($null -ne $existingRecord) {
+    $existing = Open-HunterVerifiedProcess -Record $existingRecord -Marker $ProjectRoot
+    if ($null -ne $existing) {
+        $existing.Process.Dispose()
+        throw "Viral Content Hunter is already running with PID $($existingRecord.Pid). Refusing to start a second instance."
     }
-    # Stale PID file
-    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+    Remove-HunterPidRecord -Record $existingRecord
 }
 
 # Check loopback port 8000
 $portInUse = $false
 try {
     $tcpConns = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
-    if ($null -ne $tcpConns -and $tcpConns.Count -gt 0) {
+    if ($null -ne $tcpConns) {
         $portInUse = $true
     }
 } catch {
@@ -96,23 +92,22 @@ if ($portInUse) {
 
 # 2. Support running in background if requested
 if ($Background) {
-    $selfPath = $MyInvocation.MyCommand.Path
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "powershell.exe"
-    $psi.Arguments = "-ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File `"$selfPath`""
+    $psi.Arguments = "-ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File `"$PSCommandPath`""
     if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
         $psi.Arguments += " -EnvFile `"$EnvFile`""
     }
     $psi.WorkingDirectory = $ProjectRoot
-    $psi.UseShellExecute = $true
-    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
 
     [void][System.Diagnostics.Process]::Start($psi)
     Start-Sleep -Seconds 2
 
-    if (Test-Path -LiteralPath $pidFile) {
-        $newPid = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1).ToString().Trim()
-        Write-Host "Viral Content Hunter supervisor started in background (PID: $newPid)."
+    $newRecord = Read-HunterPidRecord -PidFile $pidFile
+    if ($null -ne $newRecord -and $null -ne $newRecord.Marker) {
+        Write-Host "Viral Content Hunter supervisor started in background (PID: $($newRecord.Pid))."
         Write-Host "Port: http://127.0.0.1:8000/"
         Write-Host "Logs: logs/hunter-$(Get-Date -Format 'yyyyMMdd').log"
     } else {
@@ -121,9 +116,30 @@ if ($Background) {
     exit 0
 }
 
+# The supervisor needs its own process with the absolute script path in its command line.
+# This also keeps an interactive PowerShell session out of the PID file.
+$commandLineArgs = [Environment]::GetCommandLineArgs()
+$isSupervisor = $false
+for ($index = 1; $index -lt $commandLineArgs.Length - 1; $index++) {
+    if ($PSVersionTable.PSEdition -eq 'Desktop' -and $commandLineArgs[$index] -eq '-File' -and
+        $commandLineArgs[$index + 1] -eq $PSCommandPath) {
+        $isSupervisor = $true
+        break
+    }
+}
+if (-not $isSupervisor) {
+    $launchArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $PSCommandPath)
+    if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
+        $launchArgs += @('-EnvFile', $EnvFile)
+    }
+    & powershell.exe @launchArgs
+    exit $LASTEXITCODE
+}
+
 # 3. Load git-ignored env file
 $targetEnvFile = if ([string]::IsNullOrWhiteSpace($EnvFile)) { Join-Path $ProjectRoot "config\hunter.env" } else { $EnvFile }
 if (Test-Path -LiteralPath $targetEnvFile) {
+    $forbiddenEnv = @(Get-HunterForbiddenEnvironmentNames)
     $envLines = [System.IO.File]::ReadAllLines($targetEnvFile, [System.Text.Encoding]::UTF8)
     foreach ($line in $envLines) {
         $trimmed = $line.Trim()
@@ -132,6 +148,9 @@ if (Test-Path -LiteralPath $targetEnvFile) {
         }
         if ($trimmed -match '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
             $key = $matches[1]
+            if ($key -in $forbiddenEnv) {
+                continue
+            }
             $val = $matches[2].Trim()
             if (($val.StartsWith('"') -and $val.EndsWith('"')) -or ($val.StartsWith("'") -and $val.EndsWith("'"))) {
                 if ($val.Length -ge 2) {
@@ -141,19 +160,6 @@ if (Test-Path -LiteralPath $targetEnvFile) {
             [System.Environment]::SetEnvironmentVariable($key, $val, [System.EnvironmentVariableTarget]::Process)
         }
     }
-}
-
-# Enforce zero extra cost: purge metered/paid API keys from child environment
-$forbiddenEnv = @(
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "CODEX_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_USE_VERTEXAI"
-)
-foreach ($forbiddenKey in $forbiddenEnv) {
-    [System.Environment]::SetEnvironmentVariable($forbiddenKey, $null, [System.EnvironmentVariableTarget]::Process)
 }
 
 # 4. Check python executable
@@ -168,7 +174,12 @@ if (Test-Path -LiteralPath $stopFile) {
     Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
 }
 
-$PID | Out-File -LiteralPath $pidFile -Encoding ascii -Force
+$supervisor = [System.Diagnostics.Process]::GetCurrentProcess()
+try {
+    Write-HunterPidRecord -PidFile $pidFile -Process $supervisor -ImagePath $supervisor.MainModule.FileName -Marker $ProjectRoot
+} finally {
+    $supervisor.Dispose()
+}
 
 Write-HunterLog "Viral Content Hunter supervisor started (Supervisor PID: $PID, Loopback: 127.0.0.1:8000)."
 
@@ -206,7 +217,7 @@ try {
         $startTime = [DateTime]::UtcNow
         [void]$proc.Start()
         $childPid = $proc.Id
-        $childPid | Out-File -LiteralPath $childPidFile -Encoding ascii -Force
+        Write-HunterPidRecord -PidFile $childPidFile -Process $proc -ImagePath $pythonExe -Marker 'hunter.api.server'
         $proc.BeginOutputReadLine()
         $proc.BeginErrorReadLine()
 

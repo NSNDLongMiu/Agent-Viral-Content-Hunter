@@ -12,6 +12,7 @@ Tài liệu này hướng dẫn cách vận hành hàng ngày, giám sát hệ t
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\scripts\windows\start-hunter.ps1 -Background
   ```
+  `start-hunter.ps1` và `install.ps1` xóa các biến môi trường bị cấm của nhà cung cấp AI khỏi phiên PowerShell hiện tại trước khi khởi chạy tiến trình con.
 - **Kiểm tra trạng thái**:
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\scripts\windows\status.ps1
@@ -26,7 +27,13 @@ Tài liệu này hướng dẫn cách vận hành hàng ngày, giám sát hệ t
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\scripts\windows\stop-hunter.ps1
   ```
-  Script sẽ gửi tín hiệu dừng nhẹ nhàng (graceful shutdown), chờ tiến trình con lưu trữ trạng thái hàng đợi và đóng kết nối cơ sở dữ liệu. Sau 8 giây nếu tiến trình chưa dừng hẳn mới cưỡng chế dừng (`force kill`) và dọn sạch file PID.
+  Các file `logs/hunter.pid` và `logs/hunter-child.pid` lưu PID, thời điểm khởi tạo UTC, đường dẫn chương trình và dấu nhận diện Hunter dưới dạng JSON. `stop-hunter.ps1` kiểm tra các thông tin này trước khi gửi tín hiệu dừng. Sau tối đa 8 giây, script có thể cưỡng chế dừng tiến trình đã xác minh và các tiến trình con có quan hệ cha–con đã xác minh.
+
+- **Chạy kiểm thử script Windows**
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\selftest.ps1
+  ```
+  Bài kiểm thử dùng tiến trình giả lập và thư mục tạm. Chạy từ phiên Windows PowerShell 5.1 có quyền đọc thông tin `Win32_Process` của các tiến trình do chính phiên đó tạo.
 
 - **Theo dõi nhật ký trực tiếp**:
   ```powershell

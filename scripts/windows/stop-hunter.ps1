@@ -1,142 +1,193 @@
-# Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Stops the Viral Content Hunter process tree gracefully, then forcefully if needed.
+    Stops verified Viral Content Hunter processes.
 .DESCRIPTION
-    Reads logs/hunter.pid and logs/hunter-child.pid, signals graceful shutdown via
-    logs/hunter.stop, waits for process exit up to a timeout, then terminates remaining
-    processes forcefully, and cleans all PID files.
+    Verifies the supervisor and API PID records before signaling shutdown.
+    If needed, terminates the verified processes and their verified descendants.
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+. (Join-Path "$PSScriptRoot" 'process-record.ps1')
 
-$logsDir = Join-Path $ProjectRoot "logs"
-$pidFile = Join-Path $logsDir "hunter.pid"
-$childPidFile = Join-Path $logsDir "hunter-child.pid"
-$stopFile = Join-Path $logsDir "hunter.stop"
+function Test-HunterStaleAncestor {
+    param($Identity, [System.Collections.Generic.HashSet[int]]$StalePids)
 
-Write-Host "Stopping Viral Content Hunter..." -ForegroundColor Yellow
+    $child = $Identity.Info
+    while ($child.ParentProcessId -gt 0) {
+        $parentId = [int]$child.ParentProcessId
+        if ($StalePids.Contains($parentId)) {
+            return $true
+        }
 
-$supervisorPid = $null
-$childPid = $null
-
-if (Test-Path -LiteralPath $pidFile) {
-    $rawSupervisor = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $rawSupervisor -and $rawSupervisor.ToString().Trim() -match '^\d+$') {
-        $supervisorPid = [int]$rawSupervisor.ToString().Trim()
+        $parent = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $parentId"
+        if ($null -eq $parent -or $parent.CreationDate -ge $child.CreationDate) {
+            break
+        }
+        $child = $parent
     }
+    return $false
 }
 
-if (Test-Path -LiteralPath $childPidFile) {
-    $rawChild = Get-Content -LiteralPath $childPidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $rawChild -and $rawChild.ToString().Trim() -match '^\d+$') {
-        $childPid = [int]$rawChild.ToString().Trim()
+function Stop-Hunter {
+    param(
+        [Parameter(Mandatory)][string[]]$PidFile,
+        [Parameter(Mandatory)][string[]]$Marker,
+        [string]$StopFile,
+        [ValidateRange(0, 60)][int]$GraceTimeoutSeconds = 8
+    )
+
+    if ($PidFile.Count -ne $Marker.Count) {
+        throw 'Supply a marker for each PID file.'
     }
-}
 
-if ($null -eq $supervisorPid -and $null -eq $childPid) {
-    # Check if anything is listening on port 8000
-    $portConn = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
-    if ($null -ne $portConn -and $portConn.Count -gt 0) {
-        Write-Warning "No PID file found, but port 8000 is still listening. Owning PID: $($portConn[0].OwningProcess)"
-    } else {
-        Write-Host "Viral Content Hunter is not running (no PID files found)." -ForegroundColor Green
-    }
-    Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
-    exit 0
-}
-
-# 1. Signal graceful shutdown
-New-Item -ItemType File -Path $stopFile -Force | Out-Null
-Write-Host "Signaled stop token (logs/hunter.stop). Waiting for graceful shutdown..."
-
-# 2. Gather process tree
-function Get-DescendantPids {
-    param([int]$RootPid)
-    $results = New-Object System.Collections.Generic.List[int]
+    $roots = New-Object 'System.Collections.Generic.List[object]'
+    $targets = New-Object 'System.Collections.Generic.List[object]'
+    $stalePids = New-Object 'System.Collections.Generic.HashSet[int]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[int]'
+    $createdStopFile = $false
     try {
-        $allProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
-        $queue = New-Object System.Collections.Generic.Queue[int]
-        $queue.Enqueue($RootPid)
+        for ($index = 0; $index -lt $PidFile.Count; $index++) {
+            $record = Read-HunterPidRecord -PidFile $PidFile[$index]
+            if ($null -eq $record) {
+                continue
+            }
 
-        while ($queue.Count -gt 0) {
-            $curr = $queue.Dequeue()
-            $results.Add($curr)
-            $children = $allProcs | Where-Object { $_.ParentProcessId -eq $curr }
-            foreach ($child in $children) {
-                $queue.Enqueue([int]$child.ProcessId)
+            $root = Open-HunterVerifiedProcess -Record $record -Marker $Marker[$index]
+            if ($null -eq $root) {
+                if ($record.Pid -gt 0) {
+                    [void]$stalePids.Add($record.Pid)
+                }
+                Remove-HunterPidRecord -Record $record
+                Write-Host "STALE PID file '$($record.File)' removed. Nothing was stopped for this record."
+                continue
+            }
+            $roots.Add([pscustomobject]@{ Record = $record; Identity = $root })
+        }
+
+        foreach ($root in $roots) {
+            $identity = $root.Identity
+            if ($stalePids.Count -gt 0 -and ($stalePids.Contains($identity.Process.Id) -or
+                    (Test-HunterStaleAncestor -Identity $identity -StalePids $stalePids))) {
+                continue
+            }
+            if ($seen.Add($identity.Process.Id)) {
+                $targets.Add($identity)
             }
         }
-    } catch {
-        $results.Add($RootPid)
-    }
-    return $results
-}
 
-$allPidsToStop = New-Object System.Collections.Generic.List[int]
-if ($null -ne $supervisorPid) {
-    $tree = Get-DescendantPids -RootPid $supervisorPid
-    foreach ($id in $tree) {
-        if (-not $allPidsToStop.Contains($id)) {
-            $allPidsToStop.Add($id)
+        if ($targets.Count -eq 0) {
+            Write-Host 'No verified Hunter processes to stop.'
+            return
         }
-    }
-}
-if ($null -ne $childPid -and -not $allPidsToStop.Contains($childPid)) {
-    $childTree = Get-DescendantPids -RootPid $childPid
-    foreach ($id in $childTree) {
-        if (-not $allPidsToStop.Contains($id)) {
-            $allPidsToStop.Add($id)
-        }
-    }
-}
 
-# 3. Wait gracefully up to 8 seconds
-$graceTimeoutSeconds = 8
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-$stillRunning = $true
-
-while ($sw.Elapsed.TotalSeconds -lt $graceTimeoutSeconds) {
-    $activeCount = 0
-    foreach ($p in $allPidsToStop) {
-        $pObj = Get-Process -Id $p -ErrorAction SilentlyContinue
-        if ($null -ne $pObj) {
-            $activeCount++
-        }
-    }
-    if ($activeCount -eq 0) {
-        $stillRunning = $false
-        break
-    }
-    Start-Sleep -Milliseconds 500
-}
-
-# 4. Forceful kill if still active
-if ($stillRunning) {
-    Write-Host "Graceful shutdown timed out. Terminating remaining processes forcefully..." -ForegroundColor Yellow
-    # Kill in reverse order (children first)
-    for ($i = $allPidsToStop.Count - 1; $i -ge 0; $i--) {
-        $targetPid = $allPidsToStop[$i]
-        $targetObj = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-        if ($null -ne $targetObj) {
+        # Reopen each candidate to verify its current parent and creation time.
+        for ($index = 0; $index -lt $targets.Count; $index++) {
+            $parent = $targets[$index]
+            if ($parent.Process.HasExited) {
+                continue
+            }
+            $parentId = $parent.Process.Id
             try {
-                Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
-                Write-Host "Terminated PID $targetPid ($($targetObj.ProcessName))."
+                $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $parentId"
             } catch {
-                # Process might have just exited
+                Write-Warning "Could not enumerate children of verified PID $parentId."
+                continue
+            }
+            foreach ($child in $children) {
+                $childId = [int]$child.ProcessId
+                if ($stalePids.Contains($childId) -or $seen.Contains($childId)) {
+                    continue
+                }
+                $identity = Open-HunterProcessIdentity -ProcessId $childId
+                if ($null -eq $identity) {
+                    continue
+                }
+                if ($identity.Info.ParentProcessId -eq $parentId -and -not $parent.Process.HasExited -and
+                    $identity.StartTimeUtcTicks -gt $parent.StartTimeUtcTicks) {
+                    [void]$seen.Add($childId)
+                    $targets.Add($identity)
+                } else {
+                    $identity.Process.Dispose()
+                }
             }
         }
+
+        # A supervisor can act on the stop token. Skip it when a stale PID must be excluded.
+        if ($StopFile -and $stalePids.Count -eq 0 -and ($targets | Where-Object { -not $_.Process.HasExited } | Select-Object -First 1)) {
+            [IO.File]::WriteAllText($StopFile, '')
+            $createdStopFile = $true
+            Write-Host 'Signaled Hunter shutdown. Waiting for processes to exit...'
+        }
+
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        while ($timer.Elapsed.TotalSeconds -lt $GraceTimeoutSeconds) {
+            if (-not ($targets | Where-Object { -not $_.Process.HasExited } | Select-Object -First 1)) {
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        }
+
+        # Newer processes are descendants. Kill by the retained handles, youngest first.
+        $failed = $false
+        foreach ($target in ($targets | Sort-Object -Property StartTimeUtcTicks -Descending)) {
+            $process = $target.Process
+            if ($process.HasExited) {
+                continue
+            }
+            try {
+                $process.Kill()
+            } catch {
+                if (-not $process.HasExited) {
+                    Write-Warning "Could not terminate verified PID $($process.Id)."
+                    $failed = $true
+                }
+                continue
+            }
+            if ($process.WaitForExit(1000)) {
+                Write-Host "Terminated verified PID $($process.Id)."
+            } else {
+                Write-Warning "Verified PID $($process.Id) is still running."
+                $failed = $true
+            }
+        }
+
+        foreach ($root in $roots) {
+            if ($root.Identity.Process.HasExited) {
+                Remove-HunterPidRecord -Record $root.Record
+            }
+        }
+        if ($failed) {
+            throw 'One or more verified Hunter processes could not be stopped.'
+        }
+        Write-Host 'Verified Hunter processes stopped.' -ForegroundColor Green
+    } finally {
+        foreach ($target in $targets) {
+            $target.Process.Dispose()
+        }
+        foreach ($root in $roots) {
+            $root.Identity.Process.Dispose()
+        }
+        if ($createdStopFile) {
+            [IO.File]::Delete($StopFile)
+        }
     }
-    Start-Sleep -Seconds 1
 }
 
-# 5. Clean PID files
-Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $childPidFile -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
+# Dot-sourcing exposes Stop-Hunter without signaling or inspecting the real instance.
+if ($MyInvocation.InvocationName -ne '.') {
+    $projectRoot = (Resolve-Path -LiteralPath (Join-Path "$PSScriptRoot" '..\..')).Path
+    $logsDir = Join-Path "$projectRoot" 'logs'
+    $pidFiles = @((Join-Path "$logsDir" 'hunter.pid'), (Join-Path "$logsDir" 'hunter-child.pid'))
 
-Write-Host "Viral Content Hunter stopped successfully." -ForegroundColor Green
+    Write-Host 'Stopping Viral Content Hunter...' -ForegroundColor Yellow
+    if (-not (Test-Path -LiteralPath $pidFiles[0]) -and -not (Test-Path -LiteralPath $pidFiles[1])) {
+        $listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $listener) {
+            Write-Warning "No PID files found, but port 8000 is still listening. Owning PID: $($listener.OwningProcess)"
+        }
+    }
+    Stop-Hunter -PidFile $pidFiles -Marker @($projectRoot, 'hunter.api.server') -StopFile (Join-Path "$logsDir" 'hunter.stop')
+}

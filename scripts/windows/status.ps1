@@ -1,4 +1,4 @@
-# Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Displays current operational status of Viral Content Hunter.
@@ -10,6 +10,8 @@
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path "$PSScriptRoot" 'process-record.ps1')
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
@@ -24,46 +26,31 @@ Write-Host "============================================================" -Foreg
 
 # 1. Process Status
 Write-Host "`n[Process Status]" -ForegroundColor Yellow
-$supervisorPid = $null
-$childPid = $null
 
-if (Test-Path -LiteralPath $pidFile) {
-    $rawSup = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($null -ne $rawSup -and $rawSup.ToString().Trim() -match '^\d+$') {
-        $supervisorPid = [int]$rawSup.ToString().Trim()
+function Write-HunterProcessStatus {
+    param([string]$Label, [string]$PidFile, [string]$Marker)
+
+    $record = Read-HunterPidRecord -PidFile $PidFile
+    if ($null -eq $record) {
+        Write-Host "  ${Label}: No PID record" -ForegroundColor Gray
+        return
+    }
+    $identity = Open-HunterVerifiedProcess -Record $record -Marker $Marker
+    if ($null -eq $identity) {
+        Write-Host "  ${Label}: PID record could not be verified" -ForegroundColor Yellow
+        return
+    }
+    $process = $identity.Process
+    try {
+        $memMb = [Math]::Round($process.WorkingSet64 / 1MB, 2)
+        Write-Host "  ${Label}: RUNNING (PID: $($process.Id), Memory: $memMb MB, Started: $($process.StartTime))" -ForegroundColor Green
+    } finally {
+        $process.Dispose()
     }
 }
 
-if (Test-Path -LiteralPath $childPidFile) {
-    $rawChild = (Get-Content -LiteralPath $childPidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($null -ne $rawChild -and $rawChild.ToString().Trim() -match '^\d+$') {
-        $childPid = [int]$rawChild.ToString().Trim()
-    }
-}
-
-if ($null -ne $supervisorPid) {
-    $supProc = Get-Process -Id $supervisorPid -ErrorAction SilentlyContinue
-    if ($null -ne $supProc) {
-        $memMb = [math]::Round($supProc.WorkingSet64 / 1MB, 2)
-        Write-Host "  Supervisor: RUNNING (PID: $supervisorPid, Memory: $memMb MB, Started: $($supProc.StartTime))" -ForegroundColor Green
-    } else {
-        Write-Host "  Supervisor: NOT RUNNING (Stale PID file found: $supervisorPid)" -ForegroundColor Red
-    }
-} else {
-    Write-Host "  Supervisor: NOT RUNNING (No supervisor PID file)" -ForegroundColor Red
-}
-
-if ($null -ne $childPid) {
-    $childProc = Get-Process -Id $childPid -ErrorAction SilentlyContinue
-    if ($null -ne $childProc) {
-        $memMb = [math]::Round($childProc.WorkingSet64 / 1MB, 2)
-        Write-Host "  Uvicorn API: RUNNING (PID: $childPid, Memory: $memMb MB, Started: $($childProc.StartTime))" -ForegroundColor Green
-    } else {
-        Write-Host "  Uvicorn API: NOT RUNNING (Stale child PID file found: $childPid)" -ForegroundColor Red
-    }
-} else {
-    Write-Host "  Uvicorn API: No child PID recorded" -ForegroundColor Gray
-}
+Write-HunterProcessStatus -Label 'Supervisor' -PidFile $pidFile -Marker $ProjectRoot
+Write-HunterProcessStatus -Label 'Uvicorn API' -PidFile $childPidFile -Marker 'hunter.api.server'
 
 # 2. Port & Health Endpoint Check
 Write-Host "`n[HTTP & API Health]" -ForegroundColor Yellow
