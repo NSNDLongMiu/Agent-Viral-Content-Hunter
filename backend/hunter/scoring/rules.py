@@ -6,9 +6,11 @@ import math
 import re
 
 from hunter.interfaces.briefs import Scorer, ScoringResult
-from hunter.models.briefs import Priority, Score
+from hunter.models.briefs import FocusTag, Priority, Score
 from hunter.models.common import utcnow
 from hunter.models.sources import RawItem
+
+from .keywords import FocusRules, KeywordMatcher
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,7 @@ DEFAULT_SOURCE_RELIABILITY: dict[str, float] = {
     "tiktok": 70.0,
     "douyin": 70.0,
     "youtube": 75.0,
+    "vn_news": 65.0,
     "official_api": 90.0,
     "aggregator": 60.0,
     "unknown": 35.0,
@@ -111,6 +114,9 @@ class ScoringConfig:
     internal_weight_relevance: float = 0.35
     internal_weight_credibility: float = 0.25
 
+    focus_rules: FocusRules = field(default_factory=FocusRules)
+    focus_relevance_half_life_hours: float = 120.0
+
 
 def parse_search_traffic(label: object) -> float | None:
     """Parse approximate search traffic labels like '+50K', '10,000+', '50K+'."""
@@ -145,7 +151,7 @@ def extract_platform_key(item: RawItem) -> str:
             return "douyin"
         if "youtube" in plat:
             return "youtube"
-        if "hackernews" in plat or "hn" in plat:
+        if plat == "hacker_news" or "hackernews" in plat or "hn" in plat:
             return "hackernews"
         if "google" in plat or "trends" in plat:
             return "google_trends"
@@ -196,6 +202,19 @@ class RuleScorer:
 
     def __init__(self, config: ScoringConfig | None = None) -> None:
         self.config = config or ScoringConfig()
+        topics = self.config.topic_rules
+        self._excluded_topics = KeywordMatcher(topics.excluded_topics)
+        self._priority_topics = KeywordMatcher(topics.priority_topics)
+        self._normal_topics = KeywordMatcher(topics.normal_topics)
+        focus = self.config.focus_rules
+        self._focus_groups: tuple[tuple[FocusTag, KeywordMatcher], ...] = (
+            ("phim_ngan", KeywordMatcher(focus.phim_ngan)),
+            ("micro_drama", KeywordMatcher(focus.micro_drama)),
+            ("giai_tri", KeywordMatcher(focus.giai_tri)),
+        )
+        self._ai_production = KeywordMatcher(focus.ai_san_xuat)
+        self._weak_ai_production = KeywordMatcher(focus.ai_san_xuat_weak)
+        self._media_context = KeywordMatcher(focus.ai_san_xuat_media)
 
     def score(self, items: Sequence[RawItem]) -> ScoringResult:
         """Score the supplied evidence and explain priority and verification requirements."""
@@ -209,11 +228,11 @@ class RuleScorer:
         virality, virality_exp = self._score_virality(items, primary, distinct_source_ids)
 
         # 2. Relevance Score
-        relevance, relevance_exp = self._score_relevance(items, primary)
+        relevance, relevance_exp, focus_tags = self._score_relevance(items, primary)
 
         # 3. Credibility Score
         credibility, credibility_exp, claim_verified = self._score_credibility(
-            items, primary, distinct_source_ids
+            items, distinct_source_ids
         )
 
         # 4. Priority and missing conditions
@@ -240,6 +259,7 @@ class RuleScorer:
             credibility=credibility,
             priority=priority,
             explanation=full_explanation,
+            focus_tags=focus_tags,
         )
 
     def _score_virality(
@@ -387,12 +407,35 @@ class RuleScorer:
         explanation = "; ".join(details)
         return virality, explanation
 
+    def _match_focus_tags(self, items: Sequence[RawItem]) -> list[FocusTag]:
+        content: list[tuple[str, str]] = []
+        for item in items:
+            description = item.metadata.get("description")
+            text = " ".join(part for part in (item.title, description) if isinstance(part, str))
+            content.append((text, text.lower()))
+
+        tags = [
+            tag
+            for tag, matcher in self._focus_groups
+            if any(matcher.matches(text, lowercase) for text, lowercase in content)
+        ]
+        if any(
+            self._ai_production.matches(text, lowercase)
+            or (
+                self._weak_ai_production.matches(text, lowercase)
+                and self._media_context.matches(text, lowercase)
+            )
+            for text, lowercase in content
+        ):
+            tags.append("ai_san_xuat")
+        return tags
+
     def _score_relevance(
         self,
         items: Sequence[RawItem],
         primary: RawItem,
-    ) -> tuple[Score, str]:
-        text_corpus = " ".join(
+    ) -> tuple[Score, str, list[FocusTag]]:
+        original_text = " ".join(
             filter(
                 None,
                 [it.title or "" for it in items]
@@ -400,7 +443,8 @@ class RuleScorer:
                 + [str(it.metadata.get("topic", "")) for it in items]
                 + [str(it.metadata.get("category", "")) for it in items],
             )
-        ).lower()
+        )
+        text_corpus = original_text.lower()
 
         # Vietnamese language / diacritics detection
         has_vn_diacritics = bool(
@@ -414,15 +458,10 @@ class RuleScorer:
         is_vietnamese = has_vn_diacritics or lang in ("vi", "vie", "vietnamese") or "việt nam" in text_corpus
 
         # Topic matching
-        matched_excluded: list[str] = [
-            kw for kw in self.config.topic_rules.excluded_topics if kw in text_corpus
-        ]
-        matched_priority: list[str] = [
-            kw for kw in self.config.topic_rules.priority_topics if kw in text_corpus
-        ]
-        matched_normal: list[str] = [
-            kw for kw in self.config.topic_rules.normal_topics if kw in text_corpus
-        ]
+        matched_excluded = list(self._excluded_topics.find(original_text, text_corpus))
+        matched_priority = list(self._priority_topics.find(original_text, text_corpus))
+        matched_normal = list(self._normal_topics.find(original_text, text_corpus))
+        focus_tags = self._match_focus_tags(items)
 
         base_relevance = 45.0
         details: list[str] = []
@@ -438,6 +477,17 @@ class RuleScorer:
             base_relevance += 10.0
             details.append(f"chủ đề phổ biến: {', '.join(matched_normal[:3])} (+10)")
 
+        if focus_tags:
+            tags = ", ".join(focus_tags)
+            if matched_priority:
+                details.append(f"nhóm trọng tâm: {tags} (+0 do đã cộng điểm chủ đề ưu tiên)")
+            else:
+                base_relevance += 25.0
+                details.append(f"nhóm trọng tâm: {tags} (+25)")
+            if "ai_san_xuat" in focus_tags and len(focus_tags) > 1:
+                base_relevance += 10.0
+                details.append("giao điểm AI × phim/giải trí (+10)")
+
         if matched_excluded:
             base_relevance -= 50.0
             details.append(f"chủ đề bị loại trừ: {', '.join(matched_excluded[:2])} (-50)")
@@ -446,35 +496,36 @@ class RuleScorer:
         ref_time = primary.published_at or primary.fetched_at
         now = utcnow()
         age_hours = max(0.0, (now - ref_time).total_seconds() / 3600.0)
-        freshness_decay = 0.5 ** (age_hours / self.config.relevance_half_life_hours)
+        half_life = (
+            self.config.focus_relevance_half_life_hours
+            if focus_tags else self.config.relevance_half_life_hours
+        )
+        freshness_decay = 0.5 ** (age_hours / half_life)
         final_relevance = max(0.0, min(100.0, base_relevance * freshness_decay))
 
-        details.append(f"độ tuổi {age_hours:.1f}h (hệ số thời gian: {freshness_decay:.2f})")
+        details.append(
+            f"độ tuổi {age_hours:.1f}h (chu kỳ bán rã {half_life:g}h, hệ số thời gian: {freshness_decay:.2f})"
+        )
         relevance = max(0.0, min(100.0, round(final_relevance, 1)))
         explanation = "; ".join(details)
-        return relevance, explanation
+        return relevance, explanation, focus_tags
 
     def _score_credibility(
         self,
         items: Sequence[RawItem],
-        primary: RawItem,
         distinct_source_ids: set[str],
     ) -> tuple[Score, str, bool]:
-        # Source reliability table lookup
-        reliabilities: list[float] = []
-        for sid in distinct_source_ids:
-            rel = self.config.source_reliability.get(sid.lower())
-            if rel is None:
-                # Fallback matching
-                for key, val in self.config.source_reliability.items():
-                    if key in sid.lower():
-                        rel = val
-                        break
-            if rel is None:
-                rel = self.config.source_reliability.get("unknown", 35.0)
-            reliabilities.append(rel)
+        # Use the first evidence from each source so repeated snapshots carry the same weight.
+        reliability_table = self.config.source_reliability
+        unknown_reliability = reliability_table.get("unknown", 35.0)
+        reliabilities: dict[str, float] = {}
+        for item in items:
+            if item.source_id in distinct_source_ids and item.source_id not in reliabilities:
+                reliabilities[item.source_id] = reliability_table.get(
+                    extract_platform_key(item), unknown_reliability
+                )
 
-        base_reliability = sum(reliabilities) / len(reliabilities) if reliabilities else 35.0
+        base_reliability = sum(reliabilities.values()) / len(reliabilities) if reliabilities else 35.0
 
         # Multi-source corroboration boost
         num_sources = len(distinct_source_ids)

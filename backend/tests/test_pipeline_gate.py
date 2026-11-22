@@ -1,7 +1,7 @@
 """Tests for the draft gate: filtering weak items and conserving AI quota."""
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 import logging
 from math import inf, nan
 from pathlib import Path
@@ -14,7 +14,7 @@ from hunter.api.server import create_server_app
 from hunter.config import AuthSettings, RuntimeSettings, Settings, SettingsError, load_settings
 from hunter.db import Database
 from hunter.interfaces.briefs import ScoringResult
-from hunter.models import JobInput, JobStatus, Priority, RawItem, Source, SourceInput, WorkerKind
+from hunter.models import FocusTag, JobInput, JobStatus, Priority, RawItem, Source, SourceInput, WorkerKind
 from hunter.orchestrator import Orchestrator
 from hunter.pipeline import Dependencies, DraftGate, ScanStats, register_all
 from hunter.queue import PersistentQueue
@@ -32,6 +32,7 @@ def _scoring_result(
     relevance: float = 40.0,
     credibility: float = 35.0,
     priority: Priority = Priority.P3,
+    focus_tags: tuple[FocusTag, ...] = (),
 ) -> ScoringResult:
     return ScoringResult(
         virality=virality,
@@ -39,6 +40,7 @@ def _scoring_result(
         credibility=credibility,
         priority=priority,
         explanation="Test score",
+        focus_tags=list(focus_tags),
     )
 
 
@@ -51,7 +53,9 @@ def test_draft_gate_defaults_and_validation() -> None:
     gate = DraftGate()
     assert gate.min_virality == 60.0
     assert gate.min_relevance == 45.0
-    assert gate.max_per_scan == 8
+    assert gate.max_per_scan == 4
+    assert gate.min_focus_relevance == 50.0
+    assert gate.max_focus_per_scan == 10
 
     # Boundary values that must be accepted
     assert DraftGate(min_virality=0.0, min_relevance=0.0, max_per_scan=1)
@@ -71,6 +75,15 @@ def test_draft_gate_defaults_and_validation() -> None:
     for bad in (0, -1, -10, 8.5, True, False, "8", None):
         with pytest.raises(ValueError):
             DraftGate(max_per_scan=bad)  # type: ignore[arg-type]
+
+    assert DraftGate(min_focus_relevance=0.0, max_focus_per_scan=1)
+    assert DraftGate(min_focus_relevance=100.0)
+    for bad in (-0.1, 100.1, nan, inf, -inf, "50", True, None):
+        with pytest.raises(ValueError, match="min_focus_relevance"):
+            DraftGate(min_focus_relevance=bad)  # type: ignore[arg-type]
+    for bad in (0, -1, 6.5, True, "6", None):
+        with pytest.raises(ValueError, match="max_focus_per_scan"):
+            DraftGate(max_focus_per_scan=bad)  # type: ignore[arg-type]
 
 
 def test_draft_gate_eligibility_and_boundaries() -> None:
@@ -148,6 +161,35 @@ def test_draft_gate_select_empty_or_all_ineligible() -> None:
         ("id2", _scoring_result(virality=50.0, relevance=40.0, priority=Priority.P3)),
     ]
     assert gate.select(ineligible) == []
+
+
+def test_focus_eligibility_adds_a_relevance_only_route() -> None:
+    gate = DraftGate()
+    tags = ("micro_drama",)
+    assert not gate.is_eligible(_scoring_result(virality=10.0, relevance=49.9, focus_tags=tags))
+    assert gate.is_eligible(_scoring_result(virality=10.0, relevance=50.0, focus_tags=tags))
+    assert not gate.is_eligible(_scoring_result(virality=10.0, relevance=50.0))
+    assert gate.is_eligible(_scoring_result(virality=60.0, relevance=45.0, focus_tags=tags))
+    assert gate.is_eligible(_scoring_result(virality=0.0, relevance=0.0, priority=Priority.P2, focus_tags=tags))
+
+
+def test_draft_gate_ranks_and_caps_separate_focus_and_general_pools() -> None:
+    gate = DraftGate(max_focus_per_scan=3, max_per_scan=2)
+    tags = ("phim_ngan", "giai_tri")
+    candidates = [
+        ("focus-z", _scoring_result(virality=60.0, relevance=50.0, focus_tags=tags)),
+        ("general-p3", _scoring_result(virality=80.0, relevance=50.0)),
+        ("focus-a", _scoring_result(virality=60.0, relevance=50.0, focus_tags=tags)),
+        ("focus-p2", _scoring_result(virality=0.0, relevance=0.0, priority=Priority.P2, focus_tags=tags)),
+        ("general-out", _scoring_result(virality=70.0, relevance=50.0)),
+        ("focus-low", _scoring_result(virality=10.0, relevance=80.0, focus_tags=tags)),
+        ("general-p1", _scoring_result(priority=Priority.P1)),
+        ("focus-ineligible", _scoring_result(virality=10.0, relevance=49.9, focus_tags=tags)),
+    ]
+
+    expected = ["focus-p2", "focus-a", "focus-z", "general-p1", "general-p3"]
+    assert gate.select(candidates) == expected
+    assert gate.select(list(reversed(candidates))) == expected
 
 
 # -----------------------------------------------------------------------------
@@ -431,18 +473,24 @@ def test_config_defaults_and_env_overrides(tmp_path: Path) -> None:
     settings = load_settings(config_file, environ={})
     assert settings.runtime.draft_min_virality == 60.0
     assert settings.runtime.draft_min_relevance == 45.0
-    assert settings.runtime.max_drafts_per_scan == 8
+    assert settings.runtime.max_drafts_per_scan == 4
+    assert settings.runtime.draft_min_focus_relevance == 50.0
+    assert settings.runtime.max_focus_drafts_per_scan == 10
 
     # Overrides via HUNTER_RUNTIME__...
     overrides = {
         "HUNTER_RUNTIME__DRAFT_MIN_VIRALITY": "72.5",
         "HUNTER_RUNTIME__DRAFT_MIN_RELEVANCE": "55.0",
         "HUNTER_RUNTIME__MAX_DRAFTS_PER_SCAN": "5",
+        "HUNTER_RUNTIME__DRAFT_MIN_FOCUS_RELEVANCE": "65.5",
+        "HUNTER_RUNTIME__MAX_FOCUS_DRAFTS_PER_SCAN": "3",
     }
     settings_overridden = load_settings(config_file, environ=overrides)
     assert settings_overridden.runtime.draft_min_virality == 72.5
     assert settings_overridden.runtime.draft_min_relevance == 55.0
     assert settings_overridden.runtime.max_drafts_per_scan == 5
+    assert settings_overridden.runtime.draft_min_focus_relevance == 65.5
+    assert settings_overridden.runtime.max_focus_drafts_per_scan == 3
 
     # Validation errors on invalid env values
     with pytest.raises(SettingsError):
@@ -451,6 +499,12 @@ def test_config_defaults_and_env_overrides(tmp_path: Path) -> None:
         load_settings(config_file, environ={"HUNTER_RUNTIME__DRAFT_MIN_VIRALITY": "-5.0"})
     with pytest.raises(SettingsError):
         load_settings(config_file, environ={"HUNTER_RUNTIME__MAX_DRAFTS_PER_SCAN": "0"})
+    for bad in ("-0.1", "100.1", "nan", "inf"):
+        with pytest.raises(SettingsError, match="draft_min_focus_relevance"):
+            load_settings(config_file, environ={"HUNTER_RUNTIME__DRAFT_MIN_FOCUS_RELEVANCE": bad})
+    for bad in ("0", "6.5"):
+        with pytest.raises(SettingsError, match="max_focus_drafts_per_scan"):
+            load_settings(config_file, environ={"HUNTER_RUNTIME__MAX_FOCUS_DRAFTS_PER_SCAN": bad})
 
 
 def test_runtime_passes_draft_gate_to_dependencies_and_logs(
@@ -464,13 +518,18 @@ def test_runtime_passes_draft_gate_to_dependencies_and_logs(
         runtime=RuntimeSettings(
             enabled=True, scheduler_tick_seconds=0.01, telegram_poll_seconds=0.01,
             draft_min_virality=75.0, draft_min_relevance=50.0, max_drafts_per_scan=4,
+            draft_min_focus_relevance=65.0, max_focus_drafts_per_scan=2,
         ),
     )
 
     caplog.set_level(logging.INFO)
 
     def build_connector(source: Source) -> FakeConnector:
-        return FakeConnector(clock, source)
+        connector = FakeConnector(clock, source)
+        connector.item = connector.item.model_copy(update={
+            "title": "Short film showcase", "fetched_at": datetime.now(UTC),
+        })
+        return connector
 
     services_holder: list[Services] = []
     runtimes: list[Runtime] = []
@@ -488,6 +547,8 @@ def test_runtime_passes_draft_gate_to_dependencies_and_logs(
         assert gate.min_virality == 75.0
         assert gate.min_relevance == 50.0
         assert gate.max_per_scan == 4
+        assert gate.min_focus_relevance == 65.0
+        assert gate.max_focus_per_scan == 2
 
         # Add a source so a scan is scheduled and run
         source = runtime.services.operations.save_source(SourceInput(
@@ -495,13 +556,19 @@ def test_runtime_passes_draft_gate_to_dependencies_and_logs(
             url="https://example.invalid/logged-runtime-feed",
         ), reason="Test")
 
-        # Wait for scan completion and check log
-        _eventually(lambda: source.id in runtime.pipeline.last_scan)
+        _eventually(lambda: any(
+            record.levelno == logging.INFO and f"Scan completed for source {source.id}" in record.message
+            for record in caplog.records
+        ))
         stats = runtime.pipeline.last_scan[source.id]
         assert stats.collected >= 1
-        # Check that one INFO line was logged with counts
-        log_records = [r for r in caplog.records if r.levelno == logging.INFO and "Scan completed for source" in r.message]
-        assert len(log_records) >= 1
-        assert source.id in log_records[0].message
-        assert f"collected={stats.collected}" in log_records[0].message
-        assert f"skipped={stats.skipped}" in log_records[0].message
+        assert stats.focus_eligible == stats.focus_selected == 1
+        message = next(
+            record.message for record in caplog.records
+            if record.levelno == logging.INFO and f"Scan completed for source {source.id}" in record.message
+        )
+        assert f"collected={stats.collected}" in message
+        assert f"skipped={stats.skipped}" in message
+        assert "focus_eligible=1, focus_selected=1" in message
+        assert "Short film showcase" not in message
+        assert "example.invalid" not in message

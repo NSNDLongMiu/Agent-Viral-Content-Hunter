@@ -23,12 +23,15 @@ scheduler_tick_seconds = 30
 telegram_poll_seconds = 1
 dashboard_dir = "dashboard/dist"
 dashboard_url = "http://127.0.0.1:8000"
-# Draft gate: do not spend AI on weak items (tiết kiệm quota, ưu tiên chất lượng)
+# Ngưỡng điểm chung để tạo brief, với hạn mức nhỏ để vẫn chọn được tin có tín hiệu mạnh ngoài nhóm trọng tâm.
 draft_min_virality = 60.0
 draft_min_relevance = 45.0
-max_drafts_per_scan = 8
+max_drafts_per_scan = 4
+# Tin RSS về phim ngắn, micro-drama, giải trí và sản xuất bằng AI thường thiếu số liệu lan truyền.
+# Ngưỡng điểm phù hợp và hạn mức riêng tạo thêm chỗ cho các bài đúng trọng tâm.
+draft_min_focus_relevance = 50.0
+max_focus_drafts_per_scan = 10
 
 [auth]
-session_ttl_seconds = 28800
-# Set admin_password_hash and claude_service_token in settings.local.toml or in
-# HUNTER_AUTH__ADMIN_PASSWORD_HASH and HUNTER_AUTH__CLAUDE_SERVICE_TOKEN.
+# The dashboard has no login. Only the Claude leader's review token is configured: set claude_service_token in
+# settings.local.toml or in HUNTER_AUTH__CLAUDE_SERVICE_TOKEN.

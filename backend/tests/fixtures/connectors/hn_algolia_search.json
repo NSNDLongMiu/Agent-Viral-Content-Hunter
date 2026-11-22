@@ -1,0 +1,55 @@
+{
+  "exhaustiveNbHits": false,
+  "exhaustiveTypo": false,
+  "hits": [
+    {
+      "objectID": "49196596",
+      "title": "AI generated over 95% of China's new microdramas in Q1 2026",
+      "url": "https://www.channelnewsasia.com/east-asia/ai-microdrama-china-film-industry-actors-jobs-6229191",
+      "author": "qikouki",
+      "points": 5,
+      "num_comments": 3,
+      "created_at": "2026-08-06T13:44:20Z",
+      "created_at_i": 1786023860,
+      "_tags": [
+        "story",
+        "author_qikouki",
+        "story_49196596"
+      ]
+    },
+    {
+      "objectID": "50411326",
+      "title": "The Rise of Microdramas",
+      "url": "https://www.bbc.com/news/articles/cm87zv70jg9no",
+      "author": "sarreph",
+      "points": 5,
+      "num_comments": 0,
+      "created_at": "2026-11-08T08:09:01Z",
+      "created_at_i": 1794125341,
+      "_tags": [
+        "story",
+        "author_sarreph",
+        "story_50411326"
+      ]
+    },
+    {
+      "objectID": "49369853",
+      "title": "Microdramas boom in a shrinking Hollywood as studios chase a TikTok audience",
+      "url": "https://www.reuters.com/business/media-telecom/microdramas-boom-shrinking-hollywood-studios-chase-tiktok-audience-2026-08-18/",
+      "author": "petethomas",
+      "points": 4,
+      "num_comments": 3,
+      "created_at": "2026-08-20T02:52:33Z",
+      "created_at_i": 1787194353,
+      "_tags": [
+        "story",
+        "author_petethomas",
+        "story_49369853"
+      ]
+    }
+  ],
+  "hitsPerPage": 3,
+  "nbHits": 136,
+  "nbPages": 46,
+  "page": 0
+}

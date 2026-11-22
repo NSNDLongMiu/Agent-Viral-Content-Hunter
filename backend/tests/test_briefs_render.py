@@ -2,9 +2,11 @@
 
 from datetime import UTC, datetime, timedelta
 import json
+
+import pytest
 from pydantic import HttpUrl
 
-from hunter.models.briefs import BriefStatus, ContentBrief, HandoffStatus, Priority
+from hunter.models.briefs import AIFeasibility, AIProduction, BriefStatus, ContentBrief, HandoffStatus, Priority
 from hunter.models.sources import MetricSnapshot
 from hunter.briefs.render import to_json, to_markdown
 
@@ -157,14 +159,51 @@ def test_markdown_renders_metadata_only_notice():
     assert brief.metadata_note_vi in md
 
 
+@pytest.mark.parametrize("feasibility, label", [
+    (AIFeasibility.HIGH, "Cao"),
+    (AIFeasibility.MEDIUM, "Trung bình"),
+    (AIFeasibility.LOW, "Thấp"),
+])
+def test_markdown_renders_ai_production_and_focus_labels(feasibility: AIFeasibility, label: str) -> None:
+    brief = make_sample_content_brief()
+    brief.focus_tags = ["phim_ngan", "micro_drama", "giai_tri", "ai_san_xuat"]
+    brief.ai_production = AIProduction(
+        feasibility=feasibility,
+        approach_vi="Tạo một video hoạt hình kể chuyện hư cấu bằng ảnh minh họa và giọng đọc AI.",
+        constraints_vi=["Kiểm tra nhãn AI.", "Dùng nhân vật tự sáng tạo."],
+    )
+    markdown = to_markdown(brief)
+
+    assert "**Nhãn trọng tâm:** Phim ngắn, Micro-drama, Giải trí, Sản xuất bằng AI" in markdown
+    assert "## Khả năng làm bằng AI\n" in markdown
+    assert f"**Mức khả thi:** {label}\n" in markdown
+    assert brief.ai_production.approach_vi in markdown
+    for constraint in brief.ai_production.constraints_vi:
+        assert f"- {constraint}\n" in markdown
+
+
+def test_markdown_renders_legacy_assessment_fallback() -> None:
+    markdown = to_markdown(make_sample_content_brief())
+
+    assert "## Khả năng làm bằng AI\n\nChưa đánh giá khả năng làm bằng AI." in markdown
+
+
 def test_json_round_trips_to_content_brief():
     brief = make_sample_content_brief(metadata_only=False)
+    brief.focus_tags = ["phim_ngan", "giai_tri"]
+    brief.ai_production = AIProduction(
+        feasibility=AIFeasibility.MEDIUM,
+        approach_vi="Tạo hình minh họa bằng AI và kiểm tra các chi tiết thực tế trước khi dựng video.",
+        constraints_vi=["Xác minh nguồn."],
+    )
     json_str = to_json(brief)
 
     # Valid JSON
     parsed = json.loads(json_str)
     assert isinstance(parsed, dict)
     assert parsed["id"] == brief.id
+    assert parsed["focus_tags"] == ["phim_ngan", "giai_tri"]
+    assert parsed["ai_production"] == brief.ai_production.model_dump(mode="json")
 
     # Round trip
     restored = ContentBrief.model_validate_json(json_str)

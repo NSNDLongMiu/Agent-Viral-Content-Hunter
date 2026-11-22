@@ -2,11 +2,23 @@
 
 import json
 
-from hunter.models.briefs import ContentBrief
+from hunter.models.briefs import AIFeasibility, ContentBrief, FocusTag
+
+AI_FEASIBILITY_LABELS = {
+    AIFeasibility.HIGH: "Cao",
+    AIFeasibility.MEDIUM: "Trung bình",
+    AIFeasibility.LOW: "Thấp",
+}
+FOCUS_TAG_LABELS: dict[FocusTag, str] = {
+    "phim_ngan": "Phim ngắn",
+    "micro_drama": "Micro-drama",
+    "giai_tri": "Giải trí",
+    "ai_san_xuat": "Sản xuất bằng AI",
+}
 
 
 def to_markdown(brief: ContentBrief) -> str:
-    """Render all 24 fields of ContentBrief into a readable Vietnamese Markdown document."""
+    """Render a ContentBrief as a readable Vietnamese Markdown document."""
     lines: list[str] = [
         f"# [Hồ sơ #{brief.id}] {brief.title_vi}",
         "",
@@ -22,6 +34,8 @@ def to_markdown(brief: ContentBrief) -> str:
         f"- **Thời gian phát hiện:** {brief.discovered_at.isoformat()}",
         f"- **URL nguồn gốc:** [{brief.original_url}]({brief.original_url})",
     ]
+    focus_labels = ", ".join(FOCUS_TAG_LABELS[tag] for tag in brief.focus_tags)
+    lines.append(f"- **Nhãn trọng tâm:** {focus_labels or 'Không có'}")
 
     if brief.related_urls:
         lines.append("- **URL nguồn liên quan:**")
@@ -99,6 +113,21 @@ def to_markdown(brief: ContentBrief) -> str:
     ])
     for f in brief.suggested_formats:
         lines.append(f"- {f}")
+
+    lines.extend(["", "## Khả năng làm bằng AI", ""])
+    production = brief.ai_production
+    if production is None:
+        lines.append("Chưa đánh giá khả năng làm bằng AI.")
+    else:
+        lines.extend([
+            f"**Mức khả thi:** {AI_FEASIBILITY_LABELS[production.feasibility]}",
+            "",
+            production.approach_vi,
+            "",
+            "**Ràng buộc**",
+            "",
+        ])
+        lines.extend(f"- {constraint}" for constraint in production.constraints_vi)
 
     lines.extend([
         "",

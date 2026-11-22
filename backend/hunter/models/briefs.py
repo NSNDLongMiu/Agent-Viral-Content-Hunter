@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -7,6 +7,9 @@ from .common import Model, NonEmpty, PublicUrl, UtcDatetime
 from .sources import MetricSnapshot
 
 Score = Annotated[float, Field(ge=0, le=100)]
+
+# Content areas the production team cares about. Assigned by the scorer from keywords (code-owned, never by AI).
+FocusTag = Literal["phim_ngan", "micro_drama", "giai_tri", "ai_san_xuat"]
 
 
 class Priority(StrEnum):
@@ -32,6 +35,24 @@ class HandoffStatus(StrEnum):
     SENT = "SENT"
     SEND_FAILED = "SEND_FAILED"
     ACKNOWLEDGED = "ACKNOWLEDGED"
+
+
+class AIFeasibility(StrEnum):
+    HIGH = "CAO"
+    MEDIUM = "TRUNG_BINH"
+    LOW = "THAP"
+
+
+class AIProduction(Model):
+    """Whether and how an ORIGINAL piece inspired by this item could be made with generative AI tools.
+
+    Written by the drafter, checked by the Claude leader. It never promises quality, never names a paid product as a
+    requirement and never proposes copying a real person's likeness or voice or a copyrighted work.
+    """
+
+    feasibility: AIFeasibility
+    approach_vi: NonEmpty
+    constraints_vi: Annotated[list[NonEmpty], Field(min_length=1)]
 
 
 class BriefContent(Model):
@@ -61,6 +82,8 @@ class BriefContent(Model):
     metadata_only: bool = False
     metadata_note_vi: NonEmpty | None = None
     score_explanation: NonEmpty | None = None
+    focus_tags: list[FocusTag] = Field(default_factory=list)
+    ai_production: AIProduction | None = None
 
     @field_validator("summary_vi")
     @classmethod

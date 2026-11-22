@@ -40,7 +40,9 @@ def test_root_mount_and_dashboard_only_serve_build_files(tmp_path: Path) -> None
     settings = Settings(database_path=tmp_path / "hunter.sqlite3", runtime=RuntimeSettings(dashboard_dir=dist))
     with TestClient(create_server_app(settings, runtime_factory=runtime_factory)) as client:
         assert client.get("/api/health").json() == {"status": "ok"}
-        assert client.get("/api/briefs/inbox").status_code == 401
+        assert client.get("/api/briefs/inbox").status_code == 200
+        assert client.get("/api/review/pending").status_code == 401  # only the Claude leader's token opens review
+        assert client.get("/api/health", headers={"Host": "evil.example"}).status_code == 403
         assert client.get("/api/missing").status_code == 404
         assert client.get("/health").status_code == 404
         for path in ("/", "/sources", "/settings", "/briefs/fixture"):

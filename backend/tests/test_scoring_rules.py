@@ -4,8 +4,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import HttpUrl
 
+from hunter.models import FocusTag
 from hunter.models.briefs import Priority
 from hunter.models.sources import MetricSnapshot, RawItem
+from hunter.scoring import FocusRules
 from hunter.scoring.rules import (
     DEFAULT_PLATFORM_REFERENCES,
     PlatformReference,
@@ -156,17 +158,17 @@ def test_cross_source_corroboration_raises_virality_and_credibility():
     now = datetime.now(UTC)
 
     item1 = make_raw_item(
-        source_id="hackernews",
+        source_id="b22e54f4-94ac-4ed2-8078-0d08d986bf11",
         source_url="https://news.ycombinator.com/item?id=123",
         external_id="hn-123",
         title="Open source AI model released",
-        metadata={"hn_score": 350, "platform": "hackernews"},
+        metadata={"hn_score": 350, "platform": "hacker_news"},
         fetched_at=now,
     )
     res1 = scorer.score([item1])
 
     item2 = make_raw_item(
-        source_id="google_trends",
+        source_id="e43f314c-0f1a-48a4-90fd-b0c909351be9",
         source_url="https://trends.google.com/story/456",
         external_id="gt-456",
         title="Open source AI model trending query",
@@ -176,8 +178,15 @@ def test_cross_source_corroboration_raises_virality_and_credibility():
     res_multi = scorer.score([item1, item2])
 
     assert res_multi.virality > res1.virality
-    assert res_multi.credibility > res1.credibility
-    assert "xác nhận" in res_multi.explanation
+    assert res1.credibility == 80.0
+    assert res_multi.credibility == 92.5
+    assert "xác nhận độc lập từ nhiều nguồn (+10.0)" in res_multi.explanation
+
+    repeated_snapshot = item1.model_copy(update={"fetched_at": now + timedelta(minutes=5)})
+    assert scorer.score([item1, item2, repeated_snapshot]).credibility == res_multi.credibility
+
+    same_platform = item2.model_copy(update={"metadata": {"platform": "hacker_news"}})
+    assert scorer.score([item1, same_platform]).credibility == 90.0
 
 
 def test_priority_p1_only_when_all_conditions_hold():
@@ -385,3 +394,197 @@ def test_thresholds_are_adjustable():
     scorer_p3 = RuleScorer(config=very_strict_config)
     res_p3 = scorer_p3.score(evidence)
     assert res_p3.priority == Priority.P3
+
+
+@pytest.mark.parametrize("title", [
+    "The Traitors: New Blood", "said", "mail", "Ai cũng biết", "ai", "trainer",
+    "a.i.", "đAI", "AI_2",
+])
+def test_bare_ai_rejects_substrings_and_vietnamese_pronoun(title: str) -> None:
+    result = RuleScorer().score([make_raw_item(title=title)])
+    assert "chủ đề ưu tiên" not in result.explanation
+    assert result.focus_tags == []
+
+
+@pytest.mark.parametrize(("title", "keyword"), [
+    ("AI video", "ai"),
+    ("the AI boom", "ai"),
+    ("New A.I. models", "ai"),
+    ("trí tuệ nhân tạo", "trí tuệ nhân tạo"),
+    ("新的人工智能模型", "人工智能"),
+])
+def test_priority_keyword_matches_whole_tokens_or_embedded_cjk(title: str, keyword: str) -> None:
+    result = RuleScorer().score([make_raw_item(title=title)])
+    assert f"chủ đề ưu tiên: {keyword} (+25)" in result.explanation
+
+
+@pytest.mark.parametrize(("title", "relevance"), [
+    ("family", 55.0),
+    ("lifetime and familytree", 45.0),
+    ("Scam", 0.0),
+    ("scamper", 45.0),
+    ("Rated 18+", 0.0),
+    ("Rated 118+", 45.0),
+    ("这是赌博新闻", 0.0),
+])
+def test_normal_and_excluded_keywords_use_token_boundaries(title: str, relevance: float) -> None:
+    result = RuleScorer().score([make_raw_item(title=title, published_at=datetime.now(UTC))])
+    assert result.relevance == relevance
+
+
+@pytest.mark.parametrize(("keywords", "expected_tags"), [
+    (("short films", "shortfilm", "新短片上线"), ["phim_ngan"]),
+    (("phim ngắn", "short film", "新微电影上线"), ["phim_ngan", "giai_tri"]),
+    ((
+        "micro-drama", "microdrama", "microdramas", "micro drama", "short drama", "short dramas",
+        "vertical drama", "mini drama", "新短剧上线", "新微短剧上线", "reelshort", "dramabox",
+    ), ["micro_drama"]),
+    (("phim nhiều tập",), ["micro_drama", "giai_tri"]),
+    (("phim ngắn nhiều tập",), ["phim_ngan", "micro_drama", "giai_tri"]),
+    ((
+        "giải trí", "phim", "điện ảnh", "phim truyền hình", "diễn viên", "ca sĩ", "nghệ sĩ",
+        "concert", "album", "gameshow", "game show", "talk show", "hài", "meme", "hoạt hình",
+        "anime", "animation", "film", "movie", "tv series", "web series", "celebrity", "trailer",
+        "娱乐", "电影", "综艺", "动画", "搞笑",
+    ), ["giai_tri"]),
+    ((
+        "ai video", "ai short", "ai actor", "ai actors", "text-to-video", "text to video",
+        "image-to-video", "image to video", "video generation", "video generator",
+        "generative video", "aigc", "video do ai", "ai生成", "人工智能生成",
+    ), ["ai_san_xuat"]),
+    (("ai film", "ai movie", "ai animation", "làm phim bằng ai", "phim ai"), ["giai_tri", "ai_san_xuat"]),
+    (("ai microdrama", "ai短剧"), ["micro_drama", "ai_san_xuat"]),
+    (("Show HN", "Series A funding", "AI sell-off", "Sora, Veo, and Runway", "microdramatic", "filmstrip"), []),
+    (("ai-generated", "ai generated", "ai-made", "ai voice", "ai music", "ai avatar"), []),
+])
+def test_focus_keywords_and_overlaps(keywords: tuple[str, ...], expected_tags: list[FocusTag]) -> None:
+    scorer = RuleScorer()
+    for keyword in keywords:
+        assert scorer.score([make_raw_item(title=keyword)]).focus_tags == expected_tags, keyword
+
+
+def test_focus_tags_follow_group_order_across_the_evidence_corpus() -> None:
+    result = RuleScorer().score([
+        make_raw_item(title="AI video tools", metadata={"description": "A new Vertical Drama"}),
+        make_raw_item(title="Another AI video tool", metadata={"description": "Short Film"}),
+    ])
+    assert result.focus_tags == ["phim_ngan", "micro_drama", "giai_tri", "ai_san_xuat"]
+    assert "nhóm trọng tâm: phim_ngan, micro_drama, giai_tri, ai_san_xuat" in result.explanation
+
+
+def test_focus_tags_exclude_feed_category_and_topic() -> None:
+    scorer = RuleScorer()
+    labels = {"category": "giải trí", "topic": "short film"}
+    fashion = scorer.score([make_raw_item(title="Mốt trench coat siêu ngắn", metadata=labels)])
+    assert fashion.focus_tags == []
+    assert "chủ đề phổ biến: giải trí (+10)" in fashion.explanation
+
+    singer = scorer.score([make_raw_item(title="Ca sĩ mặt nạ: Ngọc Sơn bị loại", metadata=labels)])
+    assert singer.focus_tags == ["giai_tri"]
+
+
+@pytest.mark.parametrize("title", [
+    "Zeus – Claude Code for AI voice agents",
+    "Stop applying to jobs using AI-generated resume",
+    "AquarIum – pick your favorite (AI-generated) fish tank",
+    "ArkViz – AI generated software architecture diagrams",
+    "AI-generated filmstrip",
+])
+def test_ai_production_weak_terms_need_media_context(title: str) -> None:
+    result = RuleScorer().score([make_raw_item(title=title)])
+    assert "ai_san_xuat" not in result.focus_tags
+
+
+@pytest.mark.parametrize("title", [
+    "HappyWan – text-to-video creation",
+    "AI-generated short film wins prize",
+    "AI voice for animated series",
+])
+def test_ai_production_matches_strong_terms_or_weak_terms_with_media(title: str) -> None:
+    result = RuleScorer().score([make_raw_item(title=title)])
+    assert "ai_san_xuat" in result.focus_tags
+
+
+def test_ai_production_media_context_comes_from_the_same_item() -> None:
+    scorer = RuleScorer()
+    ai_item = make_raw_item(title="AI voice agents", metadata={"topic": "film", "category": "video"})
+    media_item = make_raw_item(title="An animated series")
+    assert "ai_san_xuat" not in scorer.score([ai_item, media_item]).focus_tags
+
+    with_description = ai_item.model_copy(update={"metadata": {"description": "For an animated series"}})
+    assert "ai_san_xuat" in scorer.score([with_description]).focus_tags
+
+
+def test_focus_keywords_are_configurable() -> None:
+    scorer = RuleScorer(ScoringConfig(focus_rules=FocusRules(phim_ngan=("ONE REEL",))))
+    assert scorer.score([make_raw_item(title="One Reel")]).focus_tags == ["phim_ngan"]
+    assert scorer.score([make_raw_item(title="Short film")]).focus_tags == ["giai_tri"]
+
+
+@pytest.mark.parametrize(("title", "expected", "focus_points", "intersection"), [
+    ("Short films", 70.0, 25, False),
+    ("AI video", 70.0, 0, False),
+    ("AI movie", 80.0, 0, True),
+    ("ai movie", 80.0, 25, True),
+    ("Entertainment concert", 80.0, 25, False),
+    ("AI movie scam", 30.0, 0, True),
+    ("Phim ngắn làm phim bằng ai", 100.0, 0, True),
+])
+def test_focus_relevance_weights(title: str, expected: float, focus_points: int, intersection: bool) -> None:
+    result = RuleScorer().score([make_raw_item(title=title, published_at=datetime.now(UTC))])
+    assert result.relevance == expected
+    assert f"nhóm trọng tâm: {', '.join(result.focus_tags)} (+{focus_points}" in result.explanation
+    assert ("giao điểm AI × phim/giải trí (+10)" in result.explanation) == intersection
+
+
+def test_focus_relevance_keeps_freshness_decay_and_cap() -> None:
+    scorer = RuleScorer()
+    title = "ai movie và giải trí"
+    now = datetime.now(UTC)
+    assert scorer.score([make_raw_item(title=title, published_at=now)]).relevance == 100.0
+    assert scorer.score([make_raw_item(
+        title=title, published_at=now - timedelta(hours=48),
+    )]).relevance == 83.4
+
+
+def test_focus_relevance_half_life_applies_only_to_tagged_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2026, 11, 22, tzinfo=UTC)
+    monkeypatch.setattr("hunter.scoring.rules.utcnow", lambda: now)
+    general = make_raw_item(title="Technology", published_at=now - timedelta(hours=96), fetched_at=now)
+    focus = general.model_copy(update={"metadata": {"description": "Text-to-video creation"}})
+
+    scorer = RuleScorer()
+    general_result = scorer.score([general])
+    focus_result = scorer.score([focus])
+
+    assert general_result.focus_tags == []
+    assert focus_result.focus_tags == ["ai_san_xuat"]
+    assert general_result.relevance == round(70.0 * 0.5 ** (96 / 48), 1)
+    assert focus_result.relevance == round(70.0 * 0.5 ** (96 / 120), 1)
+    assert "chu kỳ bán rã 48h" in general_result.explanation
+    assert "chu kỳ bán rã 120h" in focus_result.explanation
+
+
+@pytest.mark.parametrize(("platform", "expected"), [
+    ("wikipedia", 90.0),
+    ("google_trends", 85.0),
+    ("hacker_news", 80.0),
+    ("vn_news", 65.0),
+    ("unlisted_platform", 35.0),
+])
+def test_credibility_looks_up_platform_for_uuid_source_id(platform: str, expected: float) -> None:
+    item = make_raw_item(
+        source_id="8d321891-7334-4e0a-b4ea-8c8ad8a8e8ea", metadata={"platform": platform},
+    )
+    assert RuleScorer().score([item]).credibility == expected
+
+
+def test_vn_news_reliability_keeps_single_source_claim_cap() -> None:
+    scorer = RuleScorer()
+    item = make_raw_item(
+        source_id="8d321891-7334-4e0a-b4ea-8c8ad8a8e8ea", title="Short film",
+        metadata={"platform": "vn_news", "claim_type": "news"},
+    )
+    result = scorer.score([item])
+    assert result.credibility == 45.0
+    assert "chưa xác minh" in result.explanation

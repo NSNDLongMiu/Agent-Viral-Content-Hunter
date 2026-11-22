@@ -36,6 +36,8 @@ class ScanStats:
     eligible: int = 0
     selected: int = 0
     skipped: int = 0
+    focus_eligible: int = 0
+    focus_selected: int = 0
 
 
 class CollectFlow(Protocol):
@@ -187,7 +189,7 @@ class Pipeline:
             candidates.append((raw_item_id, deps.scorer.score(related)))
 
         # Apply the draft gate
-        eligible_count = sum(1 for _, scoring in candidates if deps.gate.is_eligible(scoring))
+        eligible = {item_id: scoring for item_id, scoring in candidates if deps.gate.is_eligible(scoring)}
         selected_ids = deps.gate.select(candidates)
 
         collected_count = len(result.new_item_ids) + result.duplicate_count + result.rejected_count
@@ -198,9 +200,11 @@ class Pipeline:
         self.last_scan[source.id] = ScanStats(
             collected=collected_count,
             new=new_count,
-            eligible=eligible_count,
+            eligible=len(eligible),
             selected=selected_count,
             skipped=skipped_count,
+            focus_eligible=sum(bool(scoring.focus_tags) for scoring in eligible.values()),
+            focus_selected=sum(bool(eligible[item_id].focus_tags) for item_id in selected_ids),
         )
 
         # Enqueue process_item ONLY for the selected items

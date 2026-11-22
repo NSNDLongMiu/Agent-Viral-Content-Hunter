@@ -1,7 +1,9 @@
 from collections.abc import Sequence
 from typing import Protocol
 
-from hunter.models import BriefContent, ContentBrief, Priority, RawItem, ReviewInput
+from pydantic import Field
+
+from hunter.models import BriefContent, ContentBrief, FocusTag, Priority, RawItem, ReviewInput
 from hunter.models.briefs import Score
 from hunter.models.common import Model, NonEmpty
 
@@ -12,6 +14,7 @@ class ScoringResult(Model):
     credibility: Score
     priority: Priority
     explanation: NonEmpty
+    focus_tags: list[FocusTag] = Field(default_factory=list)
 
 
 class Scorer(Protocol):

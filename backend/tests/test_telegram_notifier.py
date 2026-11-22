@@ -12,8 +12,12 @@ from urllib.request import ProxyHandler, Request
 import pytest
 
 from hunter.interfaces import SendStatus
+from hunter.models.briefs import AIFeasibility, AIProduction
 from hunter.telegram import TelegramError, TelegramNotifier, smoke
 from hunter.telegram import transport as wire
+from hunter.telegram.messages import format_handoff
+
+from .test_briefs_render import make_sample_content_brief
 
 _FAKE_CHAT = -1007771234599
 _FAKE_TOKEN = "555111:fake-test-token"
@@ -69,6 +73,36 @@ def fake_callback(update_id: int, data: str, *, chat_id: int = _FAKE_CHAT, recei
             "message": {"chat": {"id": chat_id}, "message_id": receipt},
         },
     }
+
+
+@pytest.mark.parametrize("long_approach", [False, True])
+def test_format_handoff_includes_ai_production_and_preserves_other_lines(long_approach: bool) -> None:
+    brief = make_sample_content_brief(metadata_only=True)
+    brief.focus_tags = ["micro_drama", "ai_san_xuat"]
+    approach = "Tạo video hoạt hình với ảnh minh họa, nhân vật hư cấu và giọng đọc AI."
+    if long_approach:
+        approach += " 🎬" * 3000
+    brief.ai_production = AIProduction(
+        feasibility=AIFeasibility.MEDIUM, approach_vi=approach, constraints_vi=["Kiểm tra nhãn AI."],
+    )
+    dashboard = "http://127.0.0.1:8000/briefs/fixture-id"
+    message = format_handoff(brief, dashboard)
+
+    assert len(message.encode("utf-16-le")) <= 4096 * 2
+    assert "Nhãn trọng tâm: Micro-drama, Sản xuất bằng AI" in message.splitlines()
+    expected_prefix = "Làm bằng AI: Trung bình — "
+    ai_line, = (line for line in message.splitlines() if line.startswith(expected_prefix))
+    if long_approach:
+        assert ai_line.endswith("…")
+        assert approach.startswith(ai_line.removeprefix(expected_prefix).removesuffix("…"))
+    else:
+        assert ai_line == expected_prefix + approach
+    assert brief.title_vi in message.splitlines()
+    assert f"Nguồn: {brief.original_url}" in message.splitlines()
+    assert f"Lưu ý: {brief.metadata_note_vi}" in message.splitlines()
+    assert f"Tóm tắt: {brief.summary_vi}" in message.splitlines()
+    assert f"Vì sao đáng chú ý: {brief.why_notable}" in message
+    assert message.endswith(f"Dashboard: {dashboard}")
 
 
 def test_send_is_idempotent_across_instances_and_keeps_plain_text(tmp_path: Path) -> None:

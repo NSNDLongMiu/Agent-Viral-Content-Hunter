@@ -232,9 +232,13 @@ def test_feed_does_not_expand_xml_entities() -> None:
 
 def test_registry_lists_factories_and_defaults_for_supported_sources() -> None:
     factories = available_connectors()
-    assert set(factories) == {"hacker_news", "google_trends_vn", "wikimedia_top"}
+    assert set(factories) == {
+        "hacker_news", "google_trends_vn", "wikimedia_top", "vn_entertainment_rss", "hn_search",
+    }
     defaults = default_sources()
-    assert [source.connector_id for source in defaults] == ["hacker_news", "google_trends_vn", "wikimedia_top"]
+    assert [source.connector_id for source in defaults] == [
+        "hacker_news", "google_trends_vn", "wikimedia_top", "vn_entertainment_rss", "hn_search",
+    ]
     assert all(source.url.scheme == "https" for source in defaults)
 
 

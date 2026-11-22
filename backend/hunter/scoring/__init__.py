@@ -1,5 +1,6 @@
 """Scoring module exports."""
 
+from .keywords import FocusRules
 from .rules import (
     DEFAULT_PLATFORM_REFERENCES,
     DEFAULT_SOURCE_RELIABILITY,
@@ -16,6 +17,7 @@ from .rules import (
 __all__ = [
     "DEFAULT_PLATFORM_REFERENCES",
     "DEFAULT_SOURCE_RELIABILITY",
+    "FocusRules",
     "PlatformReference",
     "RuleScorer",
     "ScoringConfig",

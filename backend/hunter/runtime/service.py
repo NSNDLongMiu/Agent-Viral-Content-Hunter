@@ -99,6 +99,8 @@ class Runtime:
             min_virality=self.settings.draft_min_virality,
             min_relevance=self.settings.draft_min_relevance,
             max_per_scan=self.settings.max_drafts_per_scan,
+            min_focus_relevance=self.settings.draft_min_focus_relevance,
+            max_focus_per_scan=self.settings.max_focus_drafts_per_scan,
         )
         dependencies = Dependencies(
             operations=services.operations, briefs=services.briefs, ingest=ingest,
@@ -118,8 +120,10 @@ class Runtime:
                 stats = pipeline.last_scan[source_id]
                 if stats is not prev_scan:
                     _LOG.info(
-                        "Scan completed for source %s: collected=%d, new=%d, eligible=%d, selected=%d, skipped=%d",
+                        "Scan completed for source %s: collected=%d, new=%d, eligible=%d, selected=%d, skipped=%d, "
+                        "focus_eligible=%d, focus_selected=%d",
                         source_id, stats.collected, stats.new, stats.eligible, stats.selected, stats.skipped,
+                        stats.focus_eligible, stats.focus_selected,
                     )
             return outcome
 

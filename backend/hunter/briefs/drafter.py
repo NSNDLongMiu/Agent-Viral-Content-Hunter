@@ -4,9 +4,11 @@ import math
 from collections.abc import Sequence
 from uuid import uuid4
 
+from pydantic import JsonValue, ValidationError
+
 from hunter.interfaces.ai import AIStatus, AITask, AIWorker
 from hunter.interfaces.briefs import BriefDrafter, ScoringResult
-from hunter.models.briefs import BriefContent
+from hunter.models.briefs import AIProduction, BriefContent
 from hunter.models.sources import RawItem
 
 from .prompts import (
@@ -18,8 +20,11 @@ from .prompts import (
 
 
 def has_body_content(items: Sequence[RawItem]) -> bool:
-    """Check if any raw item has full body text or transcript beyond title and metadata."""
-    body_fields = ("body", "content", "text", "article_text", "full_text", "transcript", "description")
+    """Check if any raw item has full body text or transcript beyond title and metadata.
+
+    `description` is deliberately not a body field: connectors store only a one-sentence teaser there.
+    """
+    body_fields = ("body", "content", "text", "article_text", "full_text", "transcript")
     for it in items:
         for field in body_fields:
             val = it.metadata.get(field)
@@ -42,6 +47,14 @@ def determine_verification_level(
     return "single_source"
 
 
+def _parse_ai_production(value: JsonValue) -> AIProduction | None:
+    try:
+        production = AIProduction.model_validate(value)
+    except ValidationError:
+        return None
+    return production if 15 <= len(production.approach_vi.split()) <= 80 else None
+
+
 class GeminiBriefDrafter:
     """Produces validated Vietnamese content briefs using an injected AIWorker."""
 
@@ -50,6 +63,23 @@ class GeminiBriefDrafter:
             raise ValueError("Draft timeout must be positive and finite")
         self.ai_worker = ai_worker
         self.timeout_seconds = timeout_seconds
+
+    async def _request_output(self, task: AITask, *, retry: bool) -> dict[str, JsonValue] | None:
+        """Return None for a schema rejection or an indistinguishable generic CLI failure."""
+        try:
+            result = await self.ai_worker.run(task)
+        except ValueError as error:
+            if str(error) == "AI output failed task schema validation":
+                return None
+            raise
+
+        if result.status == AIStatus.OK:
+            return result.output
+        # GeminiAdapter converts schema validation errors to the generic ERROR diagnostic.
+        if result.status == AIStatus.ERROR and result.error == "The AI task failed.":
+            return None
+        stage = "drafting retry" if retry else "drafting"
+        raise RuntimeError(f"AIWorker {stage} failed with status {result.status}: {result.error or 'no output'}")
 
     async def draft(
         self,
@@ -104,60 +134,42 @@ class GeminiBriefDrafter:
             timeout_seconds=self.timeout_seconds,
         )
 
-        result = await self.ai_worker.run(task)
-        if result.status != AIStatus.OK or result.output is None:
-            raise RuntimeError(
-                f"AIWorker drafting failed with status {result.status}: {result.error or 'no output'}"
-            )
+        retry = False
+        while True:
+            output = await self._request_output(task, retry=retry)
+            if output is None:
+                if retry:
+                    raise ValueError("Draft output failed schema validation or was unavailable after retry")
+                corrections = build_corrective_instructions(instructions, invalid_output_schema=True)
+            else:
+                summary_vi = str(output.get("summary_vi", "")).strip()
+                summary_word_count = len(summary_vi.split())
+                summary_valid = 50 <= summary_word_count <= 100
+                why_notable = str(output.get("why_notable", "")).strip()
+                missing_labels = [lbl for lbl in REQUIRED_WHY_NOTABLE_LABELS if lbl not in why_notable]
+                ai_production = _parse_ai_production(output.get("ai_production"))
 
-        output = result.output
+                if summary_valid and not missing_labels and ai_production is not None:
+                    break
+                if retry:
+                    if not summary_valid:
+                        raise ValueError(
+                            f"Summary word count out of range (50-100) after retry: got {summary_word_count} words"
+                        )
+                    if missing_labels:
+                        raise ValueError(
+                            f"why_notable missing required labels after retry: {', '.join(missing_labels)}"
+                        )
+                    raise ValueError("Invalid ai_production after retry")
 
-        # Validation check for summary word count and 7 why_notable labels
-        summary_vi = str(output.get("summary_vi", "")).strip()
-        summary_word_count = len(summary_vi.split())
-        summary_valid = 50 <= summary_word_count <= 100
-
-        why_notable = str(output.get("why_notable", "")).strip()
-        missing_labels = [lbl for lbl in REQUIRED_WHY_NOTABLE_LABELS if lbl not in why_notable]
-        labels_valid = len(missing_labels) == 0
-
-        # If invalid, retry ONCE with corrective instructions
-        if not summary_valid or not labels_valid:
-            corrective_instructions = build_corrective_instructions(
-                instructions,
-                summary_word_count=summary_word_count if not summary_valid else None,
-                missing_why_notable_labels=missing_labels if not labels_valid else [],
-            )
-
-            retry_task = AITask(
-                id=f"draft-retry-{uuid4().hex}",
-                instructions=corrective_instructions,
-                input=evidence_input,
-                output_schema=DRAFT_OUTPUT_SCHEMA,
-                timeout_seconds=self.timeout_seconds,
-            )
-
-            retry_result = await self.ai_worker.run(retry_task)
-            if retry_result.status != AIStatus.OK or retry_result.output is None:
-                raise RuntimeError(
-                    f"AIWorker drafting retry failed with status {retry_result.status}: "
-                    f"{retry_result.error or 'no output'}"
+                corrections = build_corrective_instructions(
+                    instructions,
+                    summary_word_count=summary_word_count,
+                    missing_why_notable_labels=missing_labels,
+                    invalid_ai_production=ai_production is None,
                 )
-
-            output = retry_result.output
-            summary_vi = str(output.get("summary_vi", "")).strip()
-            summary_word_count = len(summary_vi.split())
-            if not 50 <= summary_word_count <= 100:
-                raise ValueError(
-                    f"Summary word count out of range (50-100) after retry: got {summary_word_count} words"
-                )
-
-            why_notable = str(output.get("why_notable", "")).strip()
-            missing_labels = [lbl for lbl in REQUIRED_WHY_NOTABLE_LABELS if lbl not in why_notable]
-            if missing_labels:
-                raise ValueError(
-                    f"why_notable missing required labels after retry: {', '.join(missing_labels)}"
-                )
+            task = task.model_copy(update={"id": f"draft-retry-{uuid4().hex}", "instructions": corrections})
+            retry = True
 
         # Code-owned fields copied from evidence/scores; AI cannot overwrite them
         original_title = primary.title or "Untitled"
@@ -255,4 +267,6 @@ class GeminiBriefDrafter:
             metadata_only=metadata_only,
             metadata_note_vi=metadata_note_vi,
             score_explanation=score_explanation,
+            focus_tags=scores.focus_tags,
+            ai_production=ai_production,
         )

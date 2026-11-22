@@ -15,41 +15,39 @@ from hunter.models import (
     BriefStatus, ConnectorHealth, ContentBrief, Feedback, FeedbackInput, Handoff, HandoffStatus,
     Job, JobAttempt, JobStatus, Priority, QueueName, ReviewDecision, ReviewInput, Source, SourceInput,
 )
+from hunter.models.briefs import AIFeasibility, FocusTag
 from hunter.models.common import Model, NonEmpty, UtcDatetime
 from hunter.services.brief_store import BriefDetail, BriefProgress
 from hunter.services.operations import AuditRecord, DashboardSettings, SettingKey
 from hunter.state import NotFound
 from hunter.telegram.messages import format_handoff
 
-from .auth import require_admin, require_claude
+from .auth import require_claude
 from .dependencies import Backend, Page, Services
 
-_ADMIN_RESPONSES = {
-    401: {"description": "Valid admin access token required"},
+_RESPONSES = {
     404: {"description": "Resource not found"},
     409: {"description": "The operation conflicts with persisted state"},
 }
 
 
-def _admin_router(name: str) -> APIRouter:
-    return APIRouter(
-        prefix=f"/{name}", tags=[name], dependencies=[Depends(require_admin)],
-        responses=_ADMIN_RESPONSES,
-    )
+def _dashboard_router(name: str) -> APIRouter:
+    """Dashboard routes have no login; `local_guard` limits them to this machine."""
+    return APIRouter(prefix=f"/{name}", tags=[name], responses=_RESPONSES)
 
 
 health = APIRouter(tags=["health"])
-briefs = _admin_router("briefs")
+briefs = _dashboard_router("briefs")
 review = APIRouter(
     prefix="/review", tags=["review"], dependencies=[Depends(require_claude)],
-    responses={**_ADMIN_RESPONSES, 401: {"description": "Valid Claude leader service token required"}},
+    responses={**_RESPONSES, 401: {"description": "Valid Claude leader service token required"}},
 )
-jobs = _admin_router("jobs")
-sources = _admin_router("sources")
-handoffs = _admin_router("handoffs")
-feedback = _admin_router("feedback")
-settings = _admin_router("settings")
-monitor = _admin_router("monitor")
+jobs = _dashboard_router("jobs")
+sources = _dashboard_router("sources")
+handoffs = _dashboard_router("handoffs")
+feedback = _dashboard_router("feedback")
+settings = _dashboard_router("settings")
+monitor = _dashboard_router("monitor")
 
 
 class HealthResponse(Model):
@@ -72,11 +70,13 @@ def inbox(
     backend: Backend, page: Page, priority: Priority | None = None, platform: str | None = None,
     content_type: str | None = None, discovered_after: UtcDatetime | None = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
+    ai_feasibility: AIFeasibility | None = None, focus_tag: FocusTag | None = None,
 ) -> list[ContentBrief]:
     """List only Claude-approved briefs with optional discovery filters."""
     return backend.inbox.list(
         priority=priority, platform=platform, content_type=content_type,
-        discovered_after=discovered_after, search=search, **page.model_dump(),
+        discovered_after=discovered_after, search=search, ai_feasibility=ai_feasibility,
+        focus_tag=focus_tag, **page.model_dump(),
     )
 
 

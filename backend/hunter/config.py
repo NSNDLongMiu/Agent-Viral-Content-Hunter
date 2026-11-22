@@ -10,8 +10,6 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
-PASSWORD_HASH_PATTERN = re.compile(r"scrypt\$[0-9a-f]{32}\$[0-9a-f]{64}")
-
 
 class SettingsError(ValueError):
     """Invalid startup configuration."""
@@ -64,7 +62,9 @@ class RuntimeSettings(ConfigModel):
     dashboard_url: str = Field(default="http://127.0.0.1:8000", max_length=2048)
     draft_min_virality: float = Field(default=60.0, ge=0.0, le=100.0, allow_inf_nan=False)
     draft_min_relevance: float = Field(default=45.0, ge=0.0, le=100.0, allow_inf_nan=False)
-    max_drafts_per_scan: int = Field(default=8, ge=1)
+    max_drafts_per_scan: int = Field(default=4, ge=1)
+    draft_min_focus_relevance: float = Field(default=50.0, ge=0.0, le=100.0, allow_inf_nan=False)
+    max_focus_drafts_per_scan: int = Field(default=10, ge=1)
 
     @field_validator("dashboard_url")
     @classmethod
@@ -82,16 +82,9 @@ class RuntimeSettings(ConfigModel):
 
 
 class AuthSettings(ConfigModel):
-    admin_password_hash: SecretStr | None = None
-    claude_service_token: SecretStr | None = Field(default=None, min_length=32)
-    session_ttl_seconds: int = Field(default=28800, gt=0)
+    """The dashboard has no login; only the Claude leader's review token is configured."""
 
-    @field_validator("admin_password_hash")
-    @classmethod
-    def check_password_hash(cls, value: SecretStr | None) -> SecretStr | None:
-        if value and not PASSWORD_HASH_PATTERN.fullmatch(value.get_secret_value()):
-            raise ValueError("Use the configured scrypt password hash format")
-        return value
+    claude_service_token: SecretStr | None = Field(default=None, min_length=32)
 
     @field_validator("claude_service_token")
     @classmethod

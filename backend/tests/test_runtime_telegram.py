@@ -8,10 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hunter.api.app import create_app
-from hunter.api.auth import hash_password
 from hunter.api.dependencies import Services
 from hunter.api.server import create_server_app
-from hunter.config import AuthSettings, RuntimeSettings, Settings
+from hunter.config import RuntimeSettings, Settings
 from hunter.ingest import ClusterService
 from hunter.models import BriefStatus, ContentBrief, MetricSnapshot, RawItem, SourceInput
 from hunter.models.common import utcnow
@@ -75,9 +74,8 @@ def test_single_poller_records_ack_even_when_telegram_rejects_the_callback(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
     bot = FakeTelegram()
-    password = "Fake dashboard password"
     settings = Settings(
-        database_path=tmp_path / "hunter.sqlite3", auth=AuthSettings(admin_password_hash=hash_password(password)),
+        database_path=tmp_path / "hunter.sqlite3",
         runtime=RuntimeSettings(
             enabled=True, telegram_poll_seconds=0.01, dashboard_url="http://127.0.0.1:8000/dashboard-test",
         ),
@@ -98,12 +96,10 @@ def test_single_poller_records_ack_even_when_telegram_rejects_the_callback(
         handoff = backend.handoffs.select_by_admin(brief.id)
         send = f"/api/handoffs/{handoff.id}/send"
         check = f"/api/handoffs/{handoff.id}/check-ack"
-        token = client.post("/api/auth/login", json={"password": password}).json()["access_token"]
-        headers = {"Authorization": f"Bearer {token}"}
-        assert client.post(send, headers=headers).status_code == 501
+        assert client.post(send).status_code == 501
         assert not bot.calls
-        client.put("/api/settings/telegram_enabled", headers=headers, json={"value": True, "reason": "Test fixture"})
-        assert client.post(send, headers=headers, json={"message": "Untrusted caller text"}).json()["status"] == "SENT"
+        client.put("/api/settings/telegram_enabled", json={"value": True, "reason": "Test fixture"})
+        assert client.post(send, json={"message": "Untrusted caller text"}).json()["status"] == "SENT"
         _, message, _ = next(call for call in bot.calls if call[0] == "sendMessage")
         assert "Untrusted caller text" not in message["text"]
         assert "BÀN GIAO SẢN XUẤT" in message["text"]
@@ -113,7 +109,7 @@ def test_single_poller_records_ack_even_when_telegram_rejects_the_callback(
         assert bot.blocked.wait(3)
         try:
             for _ in range(3):
-                assert client.post(check, headers=headers).json()["status"] == "SENT"
+                assert client.post(check).json()["status"] == "SENT"
             bot.updates = [
                 {"update_id": index, "callback_query": {
                     "id": query_id, "data": callback,
@@ -123,7 +119,7 @@ def test_single_poller_records_ack_even_when_telegram_rejects_the_callback(
             ]
         finally:
             bot.release.set()
-        _eventually(lambda: client.post(check, headers=headers).json()["status"] == "ACKNOWLEDGED")
+        _eventually(lambda: client.post(check).json()["status"] == "ACKNOWLEDGED")
         callback_calls = [call for call in bot.calls if call[0] in {"answerCallbackQuery", "editMessageText"}]
         assert [method for method, _, _ in callback_calls] == ["answerCallbackQuery", "editMessageText"]
         _, answer, timeout = callback_calls[0]

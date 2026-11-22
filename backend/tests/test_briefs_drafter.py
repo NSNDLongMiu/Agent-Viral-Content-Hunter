@@ -1,21 +1,27 @@
 """Unit tests for GeminiBriefDrafter."""
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
-import pytest
-from pydantic import HttpUrl
 
+import pytest
+from pydantic import HttpUrl, JsonValue
+
+from hunter.ai import GeminiAdapter
+from hunter.ai.cli_runner import RunResult
 from hunter.interfaces.ai import AIHealth, AIResult, AIStatus, AITask
 from hunter.interfaces.briefs import ScoringResult
 from hunter.models.briefs import Priority
 from hunter.models.jobs import AIName
 from hunter.models.sources import MetricSnapshot, RawItem
-from hunter.briefs.drafter import GeminiBriefDrafter, determine_verification_level
+from hunter.briefs.drafter import GeminiBriefDrafter, determine_verification_level, has_body_content
 from hunter.briefs.prompts import (
     DRAFT_OUTPUT_SCHEMA,
     REQUIRED_WHY_NOTABLE_LABELS,
     build_draft_instructions,
 )
+
+from .test_ai_adapters import FakeRunner
 
 
 def make_vietnamese_text(n_words: int) -> str:
@@ -41,14 +47,27 @@ VALID_WHY_NOTABLE = (
     "Khả năng khai thác ở Việt Nam: Rất cao, khán giả Việt Nam yêu thích công nghệ.\n"
     "Bài học áp dụng (không sao chép): Tập trung vào giải quyết vấn đề thực tế."
 )
+VALID_AI_PRODUCTION: dict[str, JsonValue] = {
+    "feasibility": "CAO",
+    "approach_vi": (
+        "Tạo ảnh minh họa cho một câu chuyện hư cấu rồi chuyển thành video ngắn có giọng đọc AI."
+    ),
+    "constraints_vi": ["Kiểm tra quy định gắn nhãn nội dung tạo bởi AI."],
+}
 
 
 class FakeAIWorker:
     """Configurable fake AIWorker for unit tests."""
 
-    def __init__(self, responses: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        responses: list[dict[str, JsonValue] | AIResult] | None = None,
+        *,
+        validate_schema: bool = True,
+    ) -> None:
         self.responses = list(responses or [])
         self.recorded_tasks: list[AITask] = []
+        self.validate_schema = validate_schema
 
     @property
     def name(self) -> AIName:
@@ -59,7 +78,11 @@ class FakeAIWorker:
         if not self.responses:
             raise RuntimeError("No remaining responses in FakeAIWorker")
         resp = self.responses.pop(0)
-        return AIResult.success(task, resp)
+        if isinstance(resp, AIResult):
+            return resp
+        if self.validate_schema:
+            return AIResult.success(task, resp)
+        return AIResult(status=AIStatus.OK, output=resp)
 
     def health(self) -> AIHealth:
         return AIHealth(
@@ -103,6 +126,7 @@ def make_test_scores() -> ScoringResult:
         credibility=80.0,
         priority=Priority.P1,
         explanation="Điểm cao, thỏa mãn điều kiện P1",
+        focus_tags=["ai_san_xuat", "micro_drama"],
     )
 
 
@@ -124,6 +148,8 @@ def test_code_owned_fields_cannot_be_overridden_by_ai():
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["Lưu ý bản quyền"],
         "suggested_formats": ["Video ngắn 60s"],
+        "ai_production": VALID_AI_PRODUCTION,
+        "focus_tags": ["giai_tri"],
         "original_url": "https://malicious.com",
         "priority": "P3",
         "platform": "fake_platform",
@@ -132,7 +158,7 @@ def test_code_owned_fields_cannot_be_overridden_by_ai():
     with pytest.raises(ValueError, match="AI output failed task schema validation"):
         AIResult.success(task, malicious_output)
 
-    # (b) With schema-valid output, verify every code-owned field equals the value taken from evidence/scores
+    # (b) Even if a worker skips schema validation, AI-authored tags cannot replace score tags.
     valid_output = {
         "title_vi": "Tiêu đề tiếng Việt chuẩn",
         "summary_vi": make_vietnamese_text(60),
@@ -140,8 +166,10 @@ def test_code_owned_fields_cannot_be_overridden_by_ai():
         "risks_and_notes": ["Lưu ý bản quyền nhạc nền"],
         "suggested_formats": ["Video ngắn 60s"],
         "metadata_note_vi": "Tóm tắt từ metadata",
+        "ai_production": VALID_AI_PRODUCTION,
+        "focus_tags": ["giai_tri"],
     }
-    fake_worker = FakeAIWorker([valid_output])
+    fake_worker = FakeAIWorker([valid_output], validate_schema=False)
     drafter = GeminiBriefDrafter(fake_worker)
     brief = asyncio.run(drafter.draft([item], scores))
 
@@ -156,6 +184,7 @@ def test_code_owned_fields_cannot_be_overridden_by_ai():
     assert brief.credibility == scores.credibility
     assert brief.priority == scores.priority
     assert brief.score_explanation == scores.explanation
+    assert brief.focus_tags == scores.focus_tags
     assert brief.engagement_metrics == item.metrics
     assert brief.metrics_snapshot_at == item.metrics_snapshot_at
 
@@ -171,6 +200,7 @@ def test_summary_word_count_50_to_100_passes():
         "risks_and_notes": ["Không có rủi ro"],
         "suggested_formats": ["Shorts"],
         "metadata_note_vi": "Tóm tắt từ metadata",
+        "ai_production": VALID_AI_PRODUCTION,
     }
 
     fake_worker = FakeAIWorker([valid_output])
@@ -178,6 +208,8 @@ def test_summary_word_count_50_to_100_passes():
 
     brief = asyncio.run(drafter.draft([item], scores))
     assert len(brief.summary_vi.split()) == 65
+    assert brief.ai_production is not None
+    assert brief.ai_production.model_dump(mode="json") == VALID_AI_PRODUCTION
     assert len(fake_worker.recorded_tasks) == 1
     assert fake_worker.recorded_tasks[0].timeout_seconds == 180.0
 
@@ -190,6 +222,7 @@ def test_summary_word_count_out_of_range_single_retry_success():
     too_short_output = {
         "title_vi": "Tiêu đề tiếng Việt",
         "summary_vi": make_vietnamese_text(20),
+        "ai_production": VALID_AI_PRODUCTION,
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["Không có"],
         "suggested_formats": ["Shorts"],
@@ -200,6 +233,7 @@ def test_summary_word_count_out_of_range_single_retry_success():
     valid_retry_output = {
         "title_vi": "Tiêu đề tiếng Việt đã sửa",
         "summary_vi": make_vietnamese_text(70),
+        "ai_production": VALID_AI_PRODUCTION,
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["Không có"],
         "suggested_formats": ["Shorts"],
@@ -229,6 +263,7 @@ def test_summary_word_count_still_invalid_after_retry_raises_error():
     output1 = {
         "title_vi": "Tiêu đề 1",
         "summary_vi": make_vietnamese_text(25),
+        "ai_production": VALID_AI_PRODUCTION,
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["K"],
         "suggested_formats": ["S"],
@@ -237,6 +272,7 @@ def test_summary_word_count_still_invalid_after_retry_raises_error():
     output2 = {
         "title_vi": "Tiêu đề 2",
         "summary_vi": make_vietnamese_text(30),  # Still too short!
+        "ai_production": VALID_AI_PRODUCTION,
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["K"],
         "suggested_formats": ["S"],
@@ -267,6 +303,7 @@ def test_why_notable_missing_labels_triggers_retry():
         "title_vi": "Tiêu đề",
         "summary_vi": make_vietnamese_text(60),
         "why_notable": incomplete_why_notable,
+        "ai_production": VALID_AI_PRODUCTION,
         "risks_and_notes": ["K"],
         "suggested_formats": ["S"],
         "metadata_note_vi": "M",
@@ -274,6 +311,7 @@ def test_why_notable_missing_labels_triggers_retry():
 
     output2 = {
         "title_vi": "Tiêu đề sửa",
+        "ai_production": VALID_AI_PRODUCTION,
         "summary_vi": make_vietnamese_text(60),
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["K"],
@@ -290,12 +328,106 @@ def test_why_notable_missing_labels_triggers_retry():
         assert label in brief.why_notable
 
 
+def fake_draft_output() -> dict[str, JsonValue]:
+    return {
+        "title_vi": "Tiêu đề kiểm thử",
+        "summary_vi": make_vietnamese_text(60),
+        "why_notable": VALID_WHY_NOTABLE,
+        "risks_and_notes": [],
+        "suggested_formats": [],
+        "ai_production": VALID_AI_PRODUCTION,
+    }
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"feasibility": "VERY_HIGH"},
+        {"approach_vi": make_vietnamese_text(14)},
+        {"approach_vi": make_vietnamese_text(81)},
+        {"constraints_vi": []},
+        {"constraints_vi": ["Kiểm tra bản quyền.", " \t "]},
+        None,
+    ],
+    ids=["bad-enum", "14-words", "81-words", "empty-constraints", "blank-constraint", "missing"],
+)
+def test_invalid_ai_production_is_retried_once_and_rejected(change: dict[str, JsonValue] | None) -> None:
+    output = fake_draft_output()
+    if change is None:
+        del output["ai_production"]
+    else:
+        output["ai_production"] = {**VALID_AI_PRODUCTION, **change}
+    worker = FakeAIWorker([output, output], validate_schema=False)
+
+    with pytest.raises(ValueError, match="Invalid ai_production after retry"):
+        asyncio.run(GeminiBriefDrafter(worker).draft([make_test_item()], make_test_scores()))
+
+    first, retry = worker.recorded_tasks
+    assert first.output_schema == retry.output_schema == DRAFT_OUTPUT_SCHEMA
+    assert "LỖI KHẢ NĂNG LÀM BẰNG AI" in retry.instructions
+
+
+@pytest.mark.parametrize("word_count", [15, 80])
+def test_production_word_count_boundaries_pass(word_count: int) -> None:
+    output = fake_draft_output()
+    approach = make_vietnamese_text(word_count).replace(" ", "\t")
+    output["ai_production"] = {**VALID_AI_PRODUCTION, "approach_vi": approach}
+    worker = FakeAIWorker([output])
+
+    brief = asyncio.run(GeminiBriefDrafter(worker).draft([make_test_item()], make_test_scores()))
+
+    assert brief.ai_production is not None
+    assert brief.ai_production.approach_vi == approach
+    assert len(worker.recorded_tasks) == 1
+
+
+def test_worker_schema_rejection_can_recover_on_retry() -> None:
+    output = fake_draft_output()
+    del output["ai_production"]
+    worker = FakeAIWorker([output, fake_draft_output()])
+
+    brief = asyncio.run(GeminiBriefDrafter(worker).draft([make_test_item()], make_test_scores()))
+
+    assert brief.ai_production is not None
+    assert brief.ai_production.model_dump(mode="json") == VALID_AI_PRODUCTION
+    assert len(worker.recorded_tasks) == 2
+    assert "LỖI ĐỊNH DẠNG" in worker.recorded_tasks[1].instructions
+
+
+def test_gemini_adapter_retries_an_output_rejected_by_schema() -> None:
+    output = fake_draft_output()
+    del output["ai_production"]
+    runner = FakeRunner(*(
+        RunResult(0, json.dumps({"status": "SUCCESS", "structured_output": response}))
+        for response in (output, fake_draft_output())
+    ))
+    adapter = GeminiAdapter(executable="fake-agy", runner=runner)
+
+    brief = asyncio.run(GeminiBriefDrafter(adapter).draft([make_test_item()], make_test_scores()))
+
+    assert brief.ai_production is not None
+    assert brief.ai_production.model_dump(mode="json") == VALID_AI_PRODUCTION
+    _, retry_call = runner.calls
+    argv, _, _, _ = retry_call
+    assert "LỖI ĐỊNH DẠNG" in argv[argv.index("-p") + 1]
+
+
+def test_worker_quota_error_stops_without_retry() -> None:
+    worker = FakeAIWorker([AIResult(status=AIStatus.QUOTA_EXHAUSTED, error="BLOCKED (quota)")])
+
+    with pytest.raises(RuntimeError, match="QUOTA_EXHAUSTED"):
+        asyncio.run(GeminiBriefDrafter(worker).draft([make_test_item()], make_test_scores()))
+
+    assert len(worker.recorded_tasks) == 1
+
+
 def test_metadata_only_disclosure_honesty():
     # Item without body -> metadata_only is True
     item_no_body = make_test_item(has_body=False)
     scores = make_test_scores()
 
     output = {
+        "ai_production": VALID_AI_PRODUCTION,
         "title_vi": "Tiêu đề",
         "summary_vi": make_vietnamese_text(60),
         "why_notable": VALID_WHY_NOTABLE,
@@ -319,6 +451,7 @@ def test_non_metadata_only_when_body_present():
     scores = make_test_scores()
 
     output = {
+        "ai_production": VALID_AI_PRODUCTION,
         "title_vi": "Tiêu đề",
         "summary_vi": make_vietnamese_text(60),
         "why_notable": VALID_WHY_NOTABLE,
@@ -340,6 +473,7 @@ def test_feedback_passed_through_to_instructions():
     scores = make_test_scores()
 
     output = {
+        "ai_production": VALID_AI_PRODUCTION,
         "title_vi": "Tiêu đề sửa lại",
         "summary_vi": make_vietnamese_text(60),
         "why_notable": VALID_WHY_NOTABLE,
@@ -352,8 +486,11 @@ def test_feedback_passed_through_to_instructions():
     drafter = GeminiBriefDrafter(fake_worker)
 
     revision_feedback = "Tập trung phân tích kỹ hơn về thuật toán trong phần why_notable"
-    asyncio.run(drafter.draft([item], scores, feedback=revision_feedback))
+    brief = asyncio.run(drafter.draft([item], scores, feedback=revision_feedback))
 
+    assert brief.focus_tags == scores.focus_tags
+    assert brief.ai_production is not None
+    assert brief.ai_production.model_dump(mode="json") == VALID_AI_PRODUCTION
     assert len(fake_worker.recorded_tasks) == 1
     task_instructions = fake_worker.recorded_tasks[0].instructions
     assert "[YÊU CẦU SỬA ĐỔI TỪ CLAUDE LEADER (REVISION FEEDBACK)]" in task_instructions
@@ -372,6 +509,12 @@ def test_prompt_injection_guard_present_in_instructions():
 
     assert "PROMPT-INJECTION GUARD" in instructions
     assert "untrusted DATA" in instructions
+    assert "bằng các nhóm công cụ" in instructions
+    assert "chuyển ảnh thành video" in instructions
+    assert "TUYỆT ĐỐI KHÔNG đề xuất tái tạo khuôn mặt hoặc giọng nói của người thật" in instructions
+    assert "sao chép nhân vật, cảnh hoặc tập phim có bản quyền" in instructions
+    assert "khiến người xem tưởng đó là cảnh quay thật" in instructions
+    assert "feasibility phải là THAP hoặc TRUNG_BINH" in instructions
 
 
 def test_honesty_fallbacks_for_content_type_and_platform():
@@ -380,6 +523,7 @@ def test_honesty_fallbacks_for_content_type_and_platform():
     scores = make_test_scores()
 
     output = {
+        "ai_production": VALID_AI_PRODUCTION,
         "title_vi": "Tiêu đề",
         "summary_vi": make_vietnamese_text(60),
         "why_notable": VALID_WHY_NOTABLE,
@@ -431,3 +575,11 @@ def test_determine_verification_level_never_outputs_verified():
     )
     level_low = determine_verification_level([item1], low_cred_scores)
     assert level_low == "unverified (single source news/event claim)"
+
+
+def test_one_sentence_description_is_not_body_content() -> None:
+    """RSS connectors store a one-sentence teaser as `description`; that must still count as metadata only."""
+    teaser = make_test_item(metadata={"description": "Một câu mô tả ngắn lấy từ RSS."})
+    assert not has_body_content([teaser])
+    assert has_body_content([make_test_item(metadata={"body": "Toàn văn bài viết."})])
+    assert has_body_content([make_test_item(metadata={"transcript": "Phụ đề của video."})])

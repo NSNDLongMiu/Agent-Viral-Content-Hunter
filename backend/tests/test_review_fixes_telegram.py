@@ -15,7 +15,7 @@ from hunter.telegram import should_alert
 
 from .support import FixtureClock, approve, fixture_draft, pending_brief
 from .test_briefs_drafter import (
-    VALID_WHY_NOTABLE, FakeAIWorker, make_test_item, make_test_scores, make_vietnamese_text,
+    VALID_AI_PRODUCTION, VALID_WHY_NOTABLE, FakeAIWorker, make_test_item, make_test_scores, make_vietnamese_text,
 )
 from .test_telegram_notifier import _FAKE_ENV, FakeTransport, button_data, fake_callback, fake_ok, fake_sent
 
@@ -68,6 +68,7 @@ def test_approved_draft_reaches_telegram_alert_watcher(
         "why_notable": VALID_WHY_NOTABLE,
         "risks_and_notes": ["Nội dung kiểm thử"],
         "suggested_formats": ["Video ngắn"],
+        "ai_production": VALID_AI_PRODUCTION,
         "metadata_note_vi": "Tóm tắt từ metadata",
     }])
     items, scores = _evidence(count, credibility)

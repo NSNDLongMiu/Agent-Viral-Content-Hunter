@@ -23,6 +23,8 @@ from hunter.state import Conflict, IntegrationUnavailable, InvalidTransition, No
 
 from . import auth, routes
 from .dependencies import Services
+from .local_guard import local_guard
+
 
 async def _domain_error(request: Request, error: Exception) -> JSONResponse:
     if isinstance(error, NotFound):
@@ -74,8 +76,9 @@ def create_app(settings: Settings | None = None, *, notifier: Notifier | None = 
     for error in (NotFound, Conflict, InvalidTransition, IntegrationUnavailable, PaidAPIForbidden):
         application.add_exception_handler(error, _domain_error)
     application.add_exception_handler(RequestValidationError, _validation_error)
+    application.middleware("http")(local_guard)
     for router in (
-        routes.health, auth.router, routes.briefs, routes.review, routes.jobs, routes.sources,
+        routes.health, routes.briefs, routes.review, routes.jobs, routes.sources,
         routes.handoffs, routes.feedback, routes.settings, routes.monitor,
     ):
         application.include_router(router)

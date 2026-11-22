@@ -2,6 +2,7 @@
 
 from urllib.parse import urlsplit
 
+from hunter.briefs.render import AI_FEASIBILITY_LABELS, FOCUS_TAG_LABELS
 from hunter.models import ContentBrief
 
 _MAX_LENGTH = 4096
@@ -62,10 +63,28 @@ def format_handoff(brief: ContentBrief, dashboard_url: str) -> str:
         lines.append(f"Tác giả: {brief.creator}")
     if brief.metadata_only:
         lines.append(f"Lưu ý: {brief.metadata_note_vi}")
+    if brief.focus_tags:
+        lines.append("Nhãn trọng tâm: " + ", ".join(FOCUS_TAG_LABELS[tag] for tag in brief.focus_tags))
+    production = brief.ai_production
+    approach_line = len(lines)
+    if production is not None:
+        lines.append(f"Làm bằng AI: {AI_FEASIBILITY_LABELS[production.feasibility]} — ")
+
     lines.extend((f"\nTóm tắt: {brief.summary_vi}", f"\nVì sao đáng chú ý: {brief.why_notable}"))
     if brief.suggested_formats:
         lines.append("Gợi ý định dạng: " + ", ".join(brief.suggested_formats))
     if brief.risks_and_notes:
         lines.append("Rủi ro và lưu ý: " + " | ".join(brief.risks_and_notes))
     lines.append(f"\n{_DASHBOARD_LABEL}{dashboard_url}")
+
+    if production is not None:
+        approach = " ".join(production.approach_vi.split())
+        encoded = approach.encode("utf-16-le")
+        # Fit the approach around all the existing content before applying the overall cap.
+        available = _MAX_LENGTH * 2 - len("\n".join(lines).encode("utf-16-le"))
+        if len(encoded) > available:
+            clipped = encoded[:max(0, available - 2)].decode("utf-16-le", errors="ignore")
+            approach = clipped.rstrip() + "…"
+        lines[approach_line] += approach
+
     return limit_text("\n".join(lines))

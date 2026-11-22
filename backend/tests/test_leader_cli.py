@@ -12,9 +12,10 @@ from hunter.api.server import create_server_app
 from hunter.config import AuthSettings, Settings
 from hunter.db import Database
 from hunter.leader.__main__ import main
+from hunter.models.briefs import AIFeasibility, AIProduction, BriefStatus
 from hunter.services.brief_store import BriefStore
 
-from .support import FixtureClock, pending_brief
+from .support import FixtureClock, fixture_draft
 
 _FAKE_TOKEN = "fake-claude-review-test-token-not-a-secret"
 _FAKE_ENV = {"HUNTER_AUTH__CLAUDE_SERVICE_TOKEN": _FAKE_TOKEN}
@@ -48,7 +49,19 @@ def test_pending_show_and_decide_against_mounted_api(
     database = Database(tmp_path / "hunter.sqlite3")
     settings = Settings(database_path=database.path, auth=AuthSettings(claude_service_token=_FAKE_TOKEN))
     with TestClient(create_server_app(settings)) as client:
-        brief = pending_brief(BriefStore(database), FixtureClock())
+        store = BriefStore(database)
+        progress = store.create()
+        store.advance(progress.id, BriefStatus.PREPROCESSED)
+        store.advance(progress.id, BriefStatus.PROCESSING)
+        draft = fixture_draft(FixtureClock())
+        draft.focus_tags = ["phim_ngan", "micro_drama"]
+        production = AIProduction(
+            feasibility=AIFeasibility.HIGH,
+            approach_vi="Tạo video hoạt hình với ảnh minh họa, nhân vật hư cấu và giọng đọc AI.",
+            constraints_vi=["Dùng nhân vật tự sáng tạo."],
+        )
+        draft.ai_production = production
+        brief = store.submit_draft(progress.id, draft, expected_revision=0)
         fake = FakeReviewServer(client)
         assert client.get(f"/api/review/{brief.id}").status_code == 401
         assert main(["pending"], environ=_FAKE_ENV, transport=fake) == 0
@@ -59,7 +72,10 @@ def test_pending_show_and_decide_against_mounted_api(
         assert pending["original_url"] == str(brief.original_url) and pending["related_urls"] == []
         assert pending["virality_score"] == brief.virality_score
         assert main(["show", brief.id], environ=_FAKE_ENV, transport=fake) == 0
-        assert json.loads(capsys.readouterr().out)["status"] == "PENDING_CLAUDE_REVIEW"
+        shown = json.loads(capsys.readouterr().out)
+        assert shown["status"] == "PENDING_CLAUDE_REVIEW"
+        assert shown["focus_tags"] == ["phim_ngan", "micro_drama"]
+        assert shown["ai_production"] == production.model_dump(mode="json")
 
         argv = ["decide", brief.id, "--action", "APPROVE", "--reason", "  Test fixture review  ", "--revision"]
         assert main([*argv, "1"], environ=_FAKE_ENV, transport=fake) == 1

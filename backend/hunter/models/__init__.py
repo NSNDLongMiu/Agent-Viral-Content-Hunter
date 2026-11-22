@@ -1,6 +1,6 @@
 from .briefs import (
-    BriefContent, BriefStatus, ContentBrief, Feedback, FeedbackAction, FeedbackInput,
-    Handoff, HandoffStatus, Priority, ReviewAction, ReviewDecision, ReviewInput,
+    AIFeasibility, AIProduction, BriefContent, BriefStatus, ContentBrief, Feedback, FeedbackAction,
+    FeedbackInput, FocusTag, Handoff, HandoffStatus, Priority, ReviewAction, ReviewDecision, ReviewInput,
 )
 from .groups import SeriesEpisode, SeriesGroup, TrendCluster
 from .jobs import (
@@ -10,8 +10,9 @@ from .jobs import (
 from .sources import ConnectorHealth, ConnectorState, MetricSnapshot, RawItem, Source, SourceInput
 
 __all__ = [
-    "AIName", "AttemptOutcome", "BriefContent", "BriefStatus", "ConnectorHealth", "ConnectorState",
-    "ContentBrief", "Feedback", "FeedbackAction", "FeedbackInput", "Handoff", "HandoffStatus",
+    "AIFeasibility", "AIName", "AIProduction", "AttemptOutcome", "BriefContent", "BriefStatus", "ConnectorHealth",
+    "ConnectorState", "ContentBrief", "Feedback", "FeedbackAction", "FeedbackInput", "FocusTag", "Handoff",
+    "HandoffStatus",
     "Job", "JobAttempt", "JobError", "JobInput", "JobLease", "JobStatus", "MetricSnapshot",
     "Priority", "QueueName", "RawItem", "ReviewAction", "ReviewDecision", "ReviewInput",
     "SeriesEpisode", "SeriesGroup", "Source", "SourceInput", "TrendCluster", "WorkerKind",

@@ -17,8 +17,9 @@ from hunter.models import (
     AIName, BriefStatus, ConnectorHealth, ConnectorState, Job, JobError, JobInput, JobStatus,
     RawItem, ReviewInput, Source, SourceInput, WorkerKind,
 )
+from hunter.models.common import utcnow
 from hunter.orchestrator import Orchestrator
-from hunter.pipeline import Dependencies, DraftGate, Pipeline, register_all
+from hunter.pipeline import Dependencies, DraftGate, Pipeline, ScanStats, register_all
 from hunter.queue import PersistentQueue
 from hunter.services.brief_store import BriefStore
 from hunter.services.operations import OperationsService
@@ -115,6 +116,13 @@ class FakeAIWorker:
             "why_notable": "\n".join(f"{label} Dữ liệu kiểm thử." for label in REQUIRED_WHY_NOTABLE_LABELS),
             "risks_and_notes": ["Dữ liệu kiểm thử"],
             "suggested_formats": [],
+            "ai_production": {
+                "feasibility": "CAO",
+                "approach_vi": (
+                    "Tạo hình minh họa và dựng một đoạn phim hoạt hình gốc với các nhân vật hư cấu."
+                ),
+                "constraints_vi": ["Dùng nhân vật hư cấu và kiểm tra quyền sử dụng hình ảnh."],
+            },
         })
 
     def health(self) -> AIHealth:
@@ -226,6 +234,37 @@ def test_collect_port_recovers_items_if_ingest_commits_before_enqueue(fixture: P
     assert calls[0].new_item_ids
     assert calls[1].new_item_ids == []
     assert fixture.queue.list(status=JobStatus.QUEUED)[0].payload == {"raw_item_id": calls[0].new_item_ids[0]}
+
+
+def test_collect_enqueues_metricless_focus_item(fixture: PipelineFixture) -> None:
+    now = utcnow()
+    focus_item = RawItem(
+        source_id=fixture.source.id, source_url="https://example.invalid/focus",
+        fetched_at=now, title="Short film showcase",
+    )
+    general_item = RawItem(
+        source_id=fixture.source.id, source_url="https://example.invalid/general",
+        fetched_at=now, title="Local transport timetable",
+    )
+
+    class FakeFeed(FakeConnector):
+        async def fetch(self, since: datetime | None, limits: FetchLimits) -> list[RawItem]:
+            return [focus_item, general_item]
+
+    pipeline = register_all(fixture.orchestrator, replace(
+        fixture.deps, build_connector=lambda source: FakeFeed(fixture.clock, source), gate=DraftGate(),
+    ))
+    fixture.enqueue_collect()
+    assert fixture.run(WorkerKind.COLLECTOR).status == JobStatus.SUCCEEDED
+
+    assert pipeline.last_scan[fixture.source.id] == ScanStats(
+        collected=2, new=2, eligible=1, selected=1, skipped=1, focus_eligible=1, focus_selected=1,
+    )
+    queued_jobs = fixture.queue.list(status=JobStatus.QUEUED)
+    assert len(queued_jobs) == 1
+    assert queued_jobs[0].kind == "process_item"
+    queued_item = fixture.ingest.get_item(str(queued_jobs[0].payload["raw_item_id"]))
+    assert queued_item == focus_item
 
 
 @pytest.mark.parametrize("status", [BriefStatus.COLLECTED, BriefStatus.PREPROCESSED, BriefStatus.PROCESSING])

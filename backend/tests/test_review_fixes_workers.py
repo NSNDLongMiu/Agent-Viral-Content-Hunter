@@ -6,10 +6,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from hunter.api.auth import hash_password
 from hunter.api.dependencies import Services
 from hunter.api.server import create_server_app
-from hunter.config import AuthSettings, RuntimeSettings, Settings
+from hunter.config import RuntimeSettings, Settings
 from hunter.models import Job, JobError, JobLease, JobStatus, WorkerKind
 from hunter.orchestrator import Orchestrator
 from hunter.queue import PersistentQueue
@@ -149,10 +148,8 @@ def test_runtime_monitors_and_restarts_unexpected_supervisor_exit(
     restarts_successfully: bool,
 ) -> None:
     monkeypatch.setattr("hunter.runtime.service._SUPERVISOR_RESTART_LIMIT", 1)
-    password = "Fixture supervisor monitor password"
     settings = Settings(
         database_path=tmp_path / "hunter.sqlite3",
-        auth=AuthSettings(admin_password_hash=hash_password(password)),
         runtime=RuntimeSettings(enabled=True),
     )
     starts: list[None] = []
@@ -176,18 +173,16 @@ def test_runtime_monitors_and_restarts_unexpected_supervisor_exit(
         return runtime
 
     with TestClient(create_server_app(settings, runtime_factory=factory)) as client:
-        token = client.post("/api/auth/login", json={"password": password}).json()["access_token"]
-        headers = {"Authorization": f"Bearer {token}"}
         _eventually(lambda: "Worker supervisor stopped unexpectedly" in caplog.text)
         queues = "/api/monitor/queues"
-        outage = client.get(queues, headers=headers)
+        outage = client.get(queues)
         assert outage.status_code == 503
         assert outage.json()["detail"] == "Worker supervisor unavailable"
         assert client.get("/api/health").status_code == 200
         if restarts_successfully:
-            _eventually(lambda: client.get(queues, headers=headers).status_code == 200)
+            _eventually(lambda: client.get(queues).status_code == 200)
         else:
             _eventually(lambda: "Worker supervisor restart limit reached" in caplog.text)
-            assert client.get(queues, headers=headers).status_code == 503
+            assert client.get(queues).status_code == 503
         assert len(starts) == 2
     assert private_diagnostic not in caplog.text
