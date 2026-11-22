@@ -6,13 +6,12 @@ Tất cả 40+ dự đoán `// TODO(reconcile with docs/openapi.json)` trước 
 
 ---
 
-## 1. Cơ chế Xác thực & Phiên làm việc (Auth & Bearer Session)
+## 1. Xác thực (đã bỏ đăng nhập)
 
-- **Cơ chế**: Backend FastAPI sử dụng phiên đăng nhập Bearer session dạng token mờ (opaque token) lưu trong bộ nhớ tiến trình API (`POST /auth/login` nhận `{"password": "..."}` và trả về `access_token`, `token_type: "bearer"`, `expires_in`).
-- **Lưu trữ**: Token được lưu trong bộ nhớ ứng dụng (`inMemoryToken`) và đồng bộ cùng tab qua `sessionStorage` (tuyệt đối không sử dụng `localStorage`).
-- **Gửi kèm**: Mọi request được gắn header `Authorization: Bearer <token>`.
-- **Xử lý 401 & Khởi động lại API**: Khi backend khởi động lại, các session trong bộ nhớ của backend bị hủy. Client bắt HTTP 401, tự động xóa token trong bộ nhớ và `sessionStorage`, sau đó chuyển hướng về trang `/login` với thông báo thân thiện.
-- **Không có `GET /auth/me`**: Backend không có endpoint `GET /auth/me`. Tính hợp lệ của phiên đăng nhập khi tải lại trang được kiểm tra bằng request bảo vệ `GET /settings`.
+- **Hiện tại**: Dashboard không có đăng nhập, phiên hay phân quyền admin (theo yêu cầu của chủ dự án, 22/11/2026). Đã xóa `POST /auth/login`, `POST /auth/logout`, trang `/login`, `AuthContext` và toàn bộ xử lý token/401 ở client.
+- **Thay thế**: server chỉ trả lời máy này. `backend/hunter/api/local_guard.py` từ chối request có `Host` không phải `127.0.0.1`/`localhost`/`::1`, và request ghi (POST/PUT/...) có `Origin` từ trang web lạ. Nhờ đó trang web khác đang mở trong trình duyệt không điều khiển được API.
+- **Giữ nguyên**: `/review/*` vẫn cần token dịch vụ riêng của Claude Leader (quy tắc "Claude duyệt 100%" của `idead.md`). Dashboard không gọi các route này.
+- *(Nội dung cũ về Bearer session đã bị gỡ bỏ cùng với mã.)*
 
 ---
 
@@ -65,3 +64,20 @@ Tất cả 40+ dự đoán `// TODO(reconcile with docs/openapi.json)` trước 
    - Lấy cài đặt: `GET /settings` trả về `PublicSettings` gồm 4 nhóm: `preferences` (DashboardSettings), `budget` (BudgetSettings), `queue` (QueueSettings), `retention` (RetentionSettings).
    - Cập nhật cài đặt: `PUT /settings/{key}` nhận `{"reason": "...", "value": ...}` với các khóa `SettingKey`: `p1_threshold`, `scan_intervals_minutes`, `priority_topics`, `excluded_topics`, `telegram_enabled`.
    - Nhật ký kiểm toán: `GET /settings/audit` và hoàn tác `POST /settings/audit/{record_id}/undo`.
+
+---
+
+## 4. Bổ sung hợp đồng Sản xuất bằng AI & Thẻ tiêu điểm (T9d - 22/11/2026)
+
+Đối soát và đồng bộ giao diện theo đặc tả T9d phục vụ đội ngũ sản xuất video AI:
+1. **Model DTO (`ContentBrief`, `BriefDetail`)**:
+   - Thêm trường `focus_tags: FocusTag[]` ("phim_ngan", "micro_drama", "giai_tri", "ai_san_xuat"). Mặc định `[]` với hồ sơ cũ.
+   - Thêm trường `ai_production: AIProduction | null` gồm `feasibility` ("CAO" | "TRUNG_BINH" | "THAP"), `approach_vi: string`, `constraints_vi: string[]`. Mặc định `null` với hồ sơ cũ.
+2. **Bộ lọc Discovery Inbox (`GET /briefs/inbox`)**:
+   - Bổ sung 2 tham số truy vấn tùy chọn: `ai_feasibility` và `focus_tag` (tự động loại bỏ khi rỗng/all).
+   - Thêm 2 select lọc trên giao diện `InboxPage`: "Khả năng làm bằng AI" và "Nhóm nội dung", đồng bộ trực tiếp vào `react-query` cache key.
+   - Hiển thị nhãn thẻ tag tiêu điểm dạng chip (`FocusTagChip`) và huy hiệu khả năng AI (`FeasibilityBadge`) trên từng hồ sơ.
+3. **Chi tiết hồ sơ (`ContentDetailPage`)**:
+   - Hiển thị thẻ nhóm nội dung dạng chip dưới tiêu đề bài viết.
+   - Bổ sung thẻ thông tin "Khả năng làm bằng AI" (sau khối "Mức độ xác minh & Rủi ro"): hiển thị huy hiệu, phương án tiếp cận và danh sách "Ràng buộc cần lưu ý". Xử lý phòng vệ khi `ai_production` là `null` ("Chưa đánh giá khả năng làm bằng AI (hồ sơ cũ).").
+   - Sửa lỗi nút bấm bàn giao Telegram: Chỉ hiển thị nút khi trạng thái là `NOT_HANDED_OFF`, `SELECTED`, `SEND_FAILED`. Khi đã `SENT` hoặc `ACKNOWLEDGED`, chỉ hiển thị trạng thái văn bản.

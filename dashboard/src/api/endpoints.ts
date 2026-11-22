@@ -4,11 +4,9 @@
  * All HTTP requests in the application go through this module.
  */
 
-import { apiClient, clearAuthToken, setAuthToken } from './client';
+import { apiClient } from './client';
 import {
   HealthResponse,
-  LoginRequest,
-  LoginResponse,
   ContentBrief,
   BriefDetail,
   BriefProgress,
@@ -44,34 +42,14 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 // ==========================================
-// 2. Auth (Session Bearer Token)
-// ==========================================
-
-export async function login(data: LoginRequest): Promise<LoginResponse> {
-  const res = await apiClient.post<LoginResponse>('/auth/login', {
-    password: data.password,
-  });
-  if (res.access_token) {
-    setAuthToken(res.access_token);
-  }
-  return res;
-}
-
-export async function logout(): Promise<void> {
-  try {
-    await apiClient.post<void>('/auth/logout');
-  } finally {
-    clearAuthToken();
-  }
-}
-
-// ==========================================
 // 3. Briefs (Discovery Inbox & Content Detail)
 // ==========================================
 
 function enrichBrief(b: ContentBrief): ContentBrief {
   return {
     ...b,
+    focus_tags: Array.isArray(b.focus_tags) ? b.focus_tags : [],
+    ai_production: b.ai_production ?? null,
     author: b.creator,
     source_url: b.original_url,
     title_original: b.original_title,
@@ -120,6 +98,8 @@ export async function getInboxBriefs(params?: BriefFilterParams): Promise<Conten
     content_type: params?.content_type || undefined,
     discovered_after: discoveredAfter || undefined,
     search: searchParam || undefined,
+    ai_feasibility: params?.ai_feasibility || undefined,
+    focus_tag: params?.focus_tag || undefined,
     limit: params?.limit || 50,
     offset: params?.offset || 0,
   });

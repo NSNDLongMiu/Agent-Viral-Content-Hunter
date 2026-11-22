@@ -51,15 +51,12 @@ dashboard/
 
 ### HTTP Client (`src/api/client.ts`)
 - **Base URL**: Configured via `import.meta.env.VITE_API_BASE`, defaulting to `/api`.
-- **Bearer Session**: Stores opaque admin session token in memory with same-tab `sessionStorage` fallback (never `localStorage`).
-- **Authorization Header**: Automatically sends `Authorization: Bearer <token>` on authenticated endpoints.
-- **Session Expiry / Restart**: On HTTP 401, clears the token and redirects to `/login` with an informative message.
+- **No login**: there is no session, token or login page. The server only answers this machine (`backend/hunter/api/local_guard.py`).
 - **Error Handling**: Custom `ApiError` class with HTTP status code and server validation details.
 
 ### Endpoints (`src/api/endpoints.ts`) & Types (`src/api/types.ts`)
 Each endpoint maps directly to the backend routers:
 - `health`: `GET /health`
-- `auth`: `POST /auth/login`, `POST /auth/logout`
 - `briefs`:
   - `GET /briefs/inbox` (Discovery Inbox, approved briefs only)
   - `GET /briefs/:id` (Content Detail + Review History)

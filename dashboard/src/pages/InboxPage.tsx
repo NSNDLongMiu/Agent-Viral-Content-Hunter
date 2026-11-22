@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getInboxBriefs, submitFeedback, selectForHandoff } from '../api/endpoints';
-import { BriefFilterParams, ContentBrief, FeedbackAction, Priority } from '../api/types';
+import { BriefFilterParams, ContentBrief, FeedbackAction, Priority, AIFeasibility, FocusTag } from '../api/types';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { StatusBadge } from '../components/StatusBadge';
+import { FeasibilityBadge } from '../components/FeasibilityBadge';
+import { FocusTagChip } from '../components/FocusTagChip';
 import { TrendClusterModal } from '../components/TrendClusterModal';
 import { SeriesBriefModal } from '../components/SeriesBriefModal';
 
@@ -17,6 +19,8 @@ export const InboxPage: React.FC = () => {
   const [platform, setPlatform] = useState<string>('');
   const [topic, setTopic] = useState<string>('');
   const [priority, setPriority] = useState<Priority | 'all'>('all');
+  const [aiFeasibility, setAiFeasibility] = useState<AIFeasibility | 'all'>('all');
+  const [focusTag, setFocusTag] = useState<FocusTag | 'all'>('all');
   const [timeRange, setTimeRange] = useState<BriefFilterParams['time_range']>('all');
   const [search, setSearch] = useState<string>('');
 
@@ -31,6 +35,8 @@ export const InboxPage: React.FC = () => {
     platform: platform || undefined,
     topic: topic || undefined,
     priority: priority === 'all' ? undefined : priority,
+    ai_feasibility: aiFeasibility === 'all' ? undefined : aiFeasibility,
+    focus_tag: focusTag === 'all' ? undefined : focusTag,
     time_range: timeRange,
     search: search.trim() || undefined,
   };
@@ -179,6 +185,43 @@ export const InboxPage: React.FC = () => {
             </select>
           </div>
 
+          {/* AI Feasibility */}
+          <div>
+            <label className="form-label" htmlFor="ai-feasibility-select">
+              Khả năng làm bằng AI
+            </label>
+            <select
+              id="ai-feasibility-select"
+              className="form-control"
+              value={aiFeasibility}
+              onChange={(e) => setAiFeasibility(e.target.value as AIFeasibility | 'all')}
+            >
+              <option value="all">Tất cả</option>
+              <option value="CAO">Cao</option>
+              <option value="TRUNG_BINH">Trung bình</option>
+              <option value="THAP">Thấp</option>
+            </select>
+          </div>
+
+          {/* Focus Tag */}
+          <div>
+            <label className="form-label" htmlFor="focus-tag-select">
+              Nhóm nội dung
+            </label>
+            <select
+              id="focus-tag-select"
+              className="form-control"
+              value={focusTag}
+              onChange={(e) => setFocusTag(e.target.value as FocusTag | 'all')}
+            >
+              <option value="all">Tất cả</option>
+              <option value="phim_ngan">Phim ngắn</option>
+              <option value="micro_drama">Micro-drama</option>
+              <option value="giai_tri">Giải trí</option>
+              <option value="ai_san_xuat">Sản xuất bằng AI</option>
+            </select>
+          </div>
+
           {/* Time Range */}
           <div>
             <label className="form-label" htmlFor="time-range-select">
@@ -207,6 +250,8 @@ export const InboxPage: React.FC = () => {
                 setPlatform('');
                 setTopic('');
                 setPriority('all');
+                setAiFeasibility('all');
+                setFocusTag('all');
                 setTimeRange('all');
                 setSearch('');
               }}
@@ -237,6 +282,8 @@ export const InboxPage: React.FC = () => {
             setPlatform('');
             setTopic('');
             setPriority('all');
+            setAiFeasibility('all');
+            setFocusTag('all');
             setTimeRange('all');
             setSearch('');
           }}
@@ -260,8 +307,13 @@ export const InboxPage: React.FC = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <StatusBadge type="priority" value={brief.priority} />
+                  <FeasibilityBadge feasibility={brief.ai_production?.feasibility} />
                   <span className="badge badge-info">{brief.platform}</span>
                   <span className="badge badge-p3">{brief.content_type}</span>
+                  {Array.isArray(brief.focus_tags) &&
+                    brief.focus_tags.map((tag) => (
+                      <FocusTagChip key={tag} tag={tag} />
+                    ))}
                   {brief.cluster_id && (
                     <button
                       type="button"

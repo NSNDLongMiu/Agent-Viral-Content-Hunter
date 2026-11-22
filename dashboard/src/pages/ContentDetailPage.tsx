@@ -13,6 +13,8 @@ import { ApiError } from '../api/client';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
 import { StatusBadge } from '../components/StatusBadge';
+import { FeasibilityBadge } from '../components/FeasibilityBadge';
+import { FocusTagChip } from '../components/FocusTagChip';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 export const ContentDetailPage: React.FC = () => {
@@ -35,6 +37,11 @@ export const ContentDetailPage: React.FC = () => {
 
   const brief = detail?.brief;
   const reviewHistory = detail?.review_history || [];
+
+  const canHandoff =
+    brief?.handoff_status === 'NOT_HANDED_OFF' ||
+    brief?.handoff_status === 'SELECTED' ||
+    brief?.handoff_status === 'SEND_FAILED';
 
   // Export handlers
   const handleExportMarkdown = async () => {
@@ -176,11 +183,19 @@ export const ContentDetailPage: React.FC = () => {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
               <StatusBadge type="priority" value={brief.priority} />
               <StatusBadge type="review" value={brief.status} />
+              <FeasibilityBadge feasibility={brief.ai_production?.feasibility} />
               <span className="badge badge-info">{brief.platform}</span>
               <span className="badge badge-p3">Ngôn ngữ gốc: {brief.original_language}</span>
               <span className="badge badge-p3">Loại: {brief.content_type}</span>
             </div>
             <h1 style={{ fontSize: '22px', marginBottom: '4px' }}>{brief.title_vi}</h1>
+            {Array.isArray(brief.focus_tags) && brief.focus_tags.length > 0 && (
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px', marginBottom: '6px' }}>
+                {brief.focus_tags.map((tag) => (
+                  <FocusTagChip key={tag} tag={tag} />
+                ))}
+              </div>
+            )}
             <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
               Tiêu đề gốc: <em>{brief.original_title || '(Không có)'}</em>
             </p>
@@ -263,6 +278,47 @@ export const ContentDetailPage: React.FC = () => {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* AI Production Card (T9d) */}
+          <div className="card">
+            <h3 style={{ marginBottom: '8px' }}>Khả năng làm bằng AI</h3>
+            {brief.ai_production ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+                <div>
+                  <FeasibilityBadge feasibility={brief.ai_production.feasibility} />
+                </div>
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)' }}>Phương án tiếp cận:</strong>
+                  <p style={{ marginTop: '4px', lineHeight: 1.5, color: 'var(--text-primary)' }}>
+                    {brief.ai_production.approach_vi}
+                  </p>
+                </div>
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)' }}>Ràng buộc cần lưu ý:</strong>
+                  {Array.isArray(brief.ai_production.constraints_vi) && brief.ai_production.constraints_vi.length > 0 ? (
+                    <ul style={{ marginTop: '4px', paddingLeft: '20px', color: 'var(--text-secondary)' }}>
+                      {brief.ai_production.constraints_vi.map((constraint, idx) => (
+                        <li key={idx}>{constraint}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p style={{ marginTop: '4px', color: 'var(--text-muted)' }}>
+                      Không có ràng buộc đặc biệt.
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ marginBottom: '8px' }}>
+                  <FeasibilityBadge feasibility={null} />
+                </div>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+                  Chưa đánh giá khả năng làm bằng AI (hồ sơ cũ).
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Sources and URLs */}
@@ -384,18 +440,19 @@ export const ContentDetailPage: React.FC = () => {
           {/* Handoff Status & Trigger */}
           <div className="card">
             <h3 style={{ marginBottom: '8px' }}>Trạng thái bàn giao</h3>
-            <div style={{ marginBottom: '12px' }}>
+            <div style={{ marginBottom: canHandoff ? '12px' : 0 }}>
               <StatusBadge type="handoff" value={brief.handoff_status} />
             </div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ width: '100%' }}
-              onClick={() => setConfirmHandoffOpen(true)}
-              disabled={brief.handoff_status === 'SENT' || brief.handoff_status === 'ACKNOWLEDGED'}
-            >
-              🚀 Phê duyệt & Bàn giao qua Telegram
-            </button>
+            {canHandoff && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%' }}
+                onClick={() => setConfirmHandoffOpen(true)}
+              >
+                🚀 Phê duyệt & Bàn giao qua Telegram
+              </button>
+            )}
           </div>
 
           {/* Review History */}

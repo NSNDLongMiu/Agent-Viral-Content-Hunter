@@ -2,11 +2,7 @@
  * Centralized HTTP Client for Viral Content Hunter Dashboard.
  * All HTTP requests in the application MUST go through this module.
  *
- * Auth:
- * - Bearer session token stored in memory with sessionStorage as same-tab fallback (never localStorage).
- * - Sends "Authorization: Bearer <token>" on protected requests.
- * - On 401 Unauthorized: clears token and redirects to /login.
- * - Gracefully handles server restarts (which invalidate opaque in-memory sessions).
+ * There is no login: the server only answers this machine (see backend/hunter/api/local_guard.py).
  */
 
 import { ApiErrorResponse } from './types';
@@ -26,45 +22,6 @@ export class ApiError extends Error {
 }
 
 const API_BASE_URL: string = (import.meta.env.VITE_API_BASE || '/api').replace(/\/+$/, '');
-const SESSION_STORAGE_TOKEN_KEY = 'vch_admin_token';
-
-// In-memory token with same-tab sessionStorage fallback (never localStorage)
-let inMemoryToken: string | null = (() => {
-  try {
-    return sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-})();
-
-export function setAuthToken(token: string | null): void {
-  inMemoryToken = token;
-  try {
-    if (token) {
-      sessionStorage.setItem(SESSION_STORAGE_TOKEN_KEY, token);
-    } else {
-      sessionStorage.removeItem(SESSION_STORAGE_TOKEN_KEY);
-    }
-  } catch {
-    // Ignore storage errors (e.g. private browsing mode quota)
-  }
-}
-
-export function getAuthToken(): string | null {
-  if (inMemoryToken) {
-    return inMemoryToken;
-  }
-  try {
-    inMemoryToken = sessionStorage.getItem(SESSION_STORAGE_TOKEN_KEY);
-  } catch {
-    inMemoryToken = null;
-  }
-  return inMemoryToken;
-}
-
-export function clearAuthToken(): void {
-  setAuthToken(null);
-}
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined | null>;
@@ -91,11 +48,6 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     Accept: 'application/json',
   };
 
-  const token = getAuthToken();
-  if (token) {
-    defaultHeaders['Authorization'] = `Bearer ${token}`;
-  }
-
   if (!(restOptions.body instanceof FormData)) {
     defaultHeaders['Content-Type'] = 'application/json';
   }
@@ -114,16 +66,6 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   } catch {
     // Network failure / unreachable API
     throw new ApiError(0, 'Không thể kết nối đến máy chủ backend (Network Error). Vui lòng kiểm tra dịch vụ.');
-  }
-
-  // Handle 401 Unauthorized -> clear token and redirect to login
-  if (response.status === 401) {
-    clearAuthToken();
-    const isLoginRoute = window.location.pathname === '/login';
-    if (!isLoginRoute) {
-      window.location.href = '/login';
-    }
-    throw new ApiError(401, 'Phiên đăng nhập đã hết hạn hoặc máy chủ đã khởi động lại. Vui lòng đăng nhập lại.');
   }
 
   if (!response.ok) {
@@ -159,26 +101,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
 export async function downloadBlob(path: string, filename: string): Promise<void> {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
-  const headers: Record<string, string> = {};
-
-  const token = getAuthToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
 
   let response: Response;
   try {
-    response = await fetch(url, { headers });
+    response = await fetch(url);
   } catch {
     throw new ApiError(0, 'Không thể kết nối đến máy chủ để tải tệp.');
-  }
-
-  if (response.status === 401) {
-    clearAuthToken();
-    if (window.location.pathname !== '/login') {
-      window.location.href = '/login';
-    }
-    throw new ApiError(401, 'Phiên đăng nhập đã hết hạn.');
   }
 
   if (!response.ok) {

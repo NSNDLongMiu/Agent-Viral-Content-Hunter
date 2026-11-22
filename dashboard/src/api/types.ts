@@ -31,28 +31,18 @@ export interface ApiErrorResponse {
 }
 
 // ==========================================
-// 2. Auth (Login / Logout / Admin Session)
-// ==========================================
-
-export interface LoginInput {
-  password: string;
-}
-export type LoginRequest = LoginInput;
-
-export interface LoginResponse {
-  access_token: string;
-  token_type: string; // 'bearer'
-  expires_in: number;
-}
-
-export interface User {
-  username: string;
-  role: 'admin';
-}
-
-// ==========================================
 // 3. Content Brief (OpenAPI: ContentBrief, BriefDetail, BriefProgress)
 // ==========================================
+
+export type FocusTag = 'phim_ngan' | 'micro_drama' | 'giai_tri' | 'ai_san_xuat';
+
+export type AIFeasibility = 'CAO' | 'TRUNG_BINH' | 'THAP';
+
+export interface AIProduction {
+  feasibility: AIFeasibility;
+  approach_vi: string;
+  constraints_vi: string[];
+}
 
 export type Priority = 'P1' | 'P2' | 'P3';
 export type PriorityLevel = Priority;
@@ -128,6 +118,10 @@ export interface ContentBrief {
   created_at: string;
   updated_at: string;
 
+  // AI Production & Focus Tags (T9d contract)
+  focus_tags?: FocusTag[];
+  ai_production?: AIProduction | null;
+
   // Compatibility aliases for existing UI components
   author?: string | null;
   source_url?: string;
@@ -166,6 +160,8 @@ export interface BriefFilterParams {
   content_type?: string;
   discovered_after?: string;
   search?: string;
+  ai_feasibility?: AIFeasibility;
+  focus_tag?: FocusTag;
   limit?: number;
   offset?: number;
   // UI filter helpers

@@ -1,15 +1,12 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getHealth } from '../api/endpoints';
-import { useAuth } from '../context/AuthContext';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
-  const { user, logout } = useAuth();
-
   const { data: health } = useQuery({
     queryKey: ['health'],
     queryFn: getHealth,
@@ -59,22 +56,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
             {isHealthy ? 'Hệ thống trực tuyến' : 'Đang kiểm tra kết nối...'}
           </span>
         </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        {user && (
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            Quản trị: <strong>{user.username}</strong>
-          </span>
-        )}
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => logout()}
-          title="Đăng xuất khỏi bảng điều khiển"
-        >
-          Đăng xuất
-        </button>
       </div>
 
       <style>{`
