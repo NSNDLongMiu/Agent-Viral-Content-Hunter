@@ -67,9 +67,9 @@ Chính sách ngân sách được khóa cứng trong toàn bộ hệ thống:
 
 | Khóa trong TOML | Biến môi trường | Kiểu dữ liệu | Mặc định | Ý nghĩa và Hướng dẫn |
 |---|---|---|---|---|
-| `admin_password_hash` | `HUNTER_AUTH__ADMIN_PASSWORD_HASH` | Chuỗi bí mật | `None` | Chuỗi băm mật khẩu quản trị định dạng scrypt: `scrypt$<salt_hex>$<digest_hex>`. Tạo bằng công cụ tương tác: `python -m hunter.api.auth`. |
 | `claude_service_token` | `HUNTER_AUTH__CLAUDE_SERVICE_TOKEN` | Chuỗi bí mật | `None` | Mã bí mật dành riêng cho Claude Leader để gửi quyết định kiểm duyệt tại endpoint `/review/*`. Yêu cầu chuỗi ký tự ASCII ngẫu nhiên tối thiểu 32 ký tự. |
-| `session_ttl_seconds` | `HUNTER_AUTH__SESSION_TTL_SECONDS` | Số nguyên | `28800` | Thời gian hiệu lực của phiên đăng nhập quản trị trên Dashboard (28800 giây = 8 giờ). |
+
+> Dashboard **không có đăng nhập/mật khẩu**. Các khóa `admin_password_hash` và `session_ttl_seconds` đã bị gỡ: nếu file `settings.local.toml` cũ còn chúng, hệ thống từ chối khởi động (`Invalid Hunter settings`), hãy xóa hai dòng đó. Biến môi trường `HUNTER_AUTH__ADMIN_PASSWORD_HASH` còn sót sẽ bị bỏ qua.
 
 ---
 
@@ -78,13 +78,19 @@ Chính sách ngân sách được khóa cứng trong toàn bộ hệ thống:
 | Khóa trong TOML | Biến môi trường | Kiểu dữ liệu | Mặc định | Ý nghĩa và Hướng dẫn |
 |---|---|---|---|---|
 | `enabled` | `HUNTER_RUNTIME__ENABLED` | Boolean | `false` | Bật hoặc tắt việc tự động kích hoạt các worker quét tin và xử lý trong tiến trình nền uvicorn. |
-| `draft_min_virality` | `HUNTER_RUNTIME__DRAFT_MIN_VIRALITY` | Float | `60.0` | Ngưỡng điểm lan truyền tối thiểu (0.0–100.0) để bài viết đủ điều kiện đưa vào luồng tạo brief AI. Tiết kiệm quota thuê bao AI và ưu tiên nội dung chất lượng cao. |
+| `draft_min_virality` | `HUNTER_RUNTIME__DRAFT_MIN_VIRALITY` | Float | `60.0` | Ngưỡng điểm lan truyền (0.0–100.0) dùng cùng ngưỡng điểm phù hợp để xét điều kiện tạo brief. |
 | `draft_min_relevance` | `HUNTER_RUNTIME__DRAFT_MIN_RELEVANCE` | Float | `45.0` | Ngưỡng điểm phù hợp tối thiểu (0.0–100.0) kết hợp với độ lan truyền để xét duyệt bài viết. |
-| `max_drafts_per_scan` | `HUNTER_RUNTIME__MAX_DRAFTS_PER_SCAN` | Số nguyên | `8` | Số lượng bài viết tối đa được chọn để tạo brief AI trong mỗi lượt quét (tối thiểu 1). Giới hạn số lượng draft tránh dồn ứ hàng đợi và cạn kiệt quota. |
+| `max_drafts_per_scan` | `HUNTER_RUNTIME__MAX_DRAFTS_PER_SCAN` | Số nguyên | `4` | Hạn mức tạo brief mỗi lượt quét cho các bài ngoài nhóm trọng tâm (tối thiểu 1). |
+| `draft_min_focus_relevance` | `HUNTER_RUNTIME__DRAFT_MIN_FOCUS_RELEVANCE` | Float | `50.0` | Ngưỡng điểm phù hợp (0.0–100.0) để bài có ít nhất một thẻ trọng tâm đủ điều kiện tạo brief, kể cả khi thiếu số liệu lan truyền. |
+| `max_focus_drafts_per_scan` | `HUNTER_RUNTIME__MAX_FOCUS_DRAFTS_PER_SCAN` | Số nguyên | `10` | Hạn mức tạo brief mỗi lượt quét cho các bài có thẻ trọng tâm (tối thiểu 1). |
+
+Tin RSS về phim ngắn, micro-drama, giải trí và sản xuất bằng AI thường thiếu số liệu lan truyền. Ngưỡng điểm phù hợp riêng giúp các bài trọng tâm đủ điều kiện được chọn, còn hạn mức riêng giúp tiết kiệm quota AI. Các bài P1/P2 hoặc đạt cả hai ngưỡng lan truyền và phù hợp chung cũng đủ điều kiện. Mỗi bài dùng hạn mức của nhóm mình và hệ thống đưa các bài trọng tâm đã chọn vào hàng đợi xử lý trước.
+
+Mỗi lượt quét dành tối đa 10 suất cho các bài trọng tâm để có thêm chỗ cho tin đúng chủ đề. Hạn mức 4 suất ngoài nhóm trọng tâm giúp giảm số bài ít liên quan mà vẫn giữ chỗ cho các tín hiệu lan truyền mạnh.
 
 > [!IMPORTANT]
 > **Cơ chế lọc bài Draft Gate (tiết kiệm quota AI):**
-> Một bài viết bị bỏ qua (skipped) ở lượt quét hiện tại do không đủ điều kiện điểm số hoặc vượt quá trần số lượng (`max_drafts_per_scan`) sẽ được lưu trữ an toàn trong SQLite dưới dạng bằng chứng thô (`raw_items`) mà không tạo brief và không tiêu tốn lượt gọi AI Gemini. Do cơ chế chống trùng lặp (deduplication) tại tầng Ingest, các lượt quét sau sẽ coi bài viết này là trùng lặp và không đánh giá lại trong phiên bản MVP này (tính năng phát hiện xu hướng mới nổi - emerging-viral detection qua snapshot số liệu thứ hai sẽ được phát triển ở giai đoạn sau).
+> Một bài viết bị bỏ qua (skipped) ở lượt quét hiện tại do không đủ điều kiện điểm số hoặc vượt hạn mức của nhóm sẽ được lưu trữ an toàn trong SQLite dưới dạng bằng chứng thô (`raw_items`) mà không tạo brief và không tiêu tốn lượt gọi AI Gemini. Do cơ chế chống trùng lặp (deduplication) tại tầng Ingest, các lượt quét sau sẽ coi bài viết này là trùng lặp và không đánh giá lại trong phiên bản MVP này (tính năng phát hiện xu hướng mới nổi - emerging-viral detection qua snapshot số liệu thứ hai sẽ được phát triển ở giai đoạn sau).
 
 ---
 

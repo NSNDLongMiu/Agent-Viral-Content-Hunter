@@ -148,7 +148,7 @@ Thông báo `STALE PID file` cho biết `stop-hunter.ps1` đã dọn file có th
    npm run build
    cd ..
    ```
-2. Đảm bảo toàn bộ các lời gọi API từ bên ngoài đều đi qua tiền tố `/api` (ví dụ: `http://127.0.0.1:8000/api/health`, `http://127.0.0.1:8000/api/auth/login`). Giao diện Dashboard được phân phối tại gốc `/` và API được gắn tại `/api`.
+2. Đảm bảo toàn bộ các lời gọi API từ bên ngoài đều đi qua tiền tố `/api` (ví dụ: `http://127.0.0.1:8000/api/health`, `http://127.0.0.1:8000/api/briefs/inbox`). Nếu nhận `403 This API only answers local requests`, bạn đang gọi bằng tên máy khác `127.0.0.1`/`localhost` (hoặc từ một trang web lạ); hãy dùng `http://127.0.0.1:8000`. Giao diện Dashboard được phân phối tại gốc `/` và API được gắn tại `/api`.
 
 ---
 

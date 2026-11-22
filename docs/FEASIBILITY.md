@@ -34,6 +34,24 @@ Raw evidence: `spikes/REPORT.md`, `spikes/out/*.json`. Reproduce: `python spikes
 
 **Honest conclusion on the product's two priority sources:** with free, legitimate, no-login endpoints we can **not** do viral *discovery* on TikTok or Douyin today. We can enrich a known TikTok URL via oEmbed. Do not claim a Douyin/TikTok connector is done. MVP discovery starts from HN, Google Trends VN and Wikimedia (cross-market signals), then YouTube once fixed, plus admin-supplied URLs/keywords.
 
+## T9a — short film, micro-drama, and entertainment sources
+
+The orchestrator verified the public endpoints and checked robots.txt on 2026-11-22. Access requires no account, key, or payment card.
+
+| Feed | URL | robots.txt |
+|---|---|---|
+| VnExpress Giải trí | `https://vnexpress.net/rss/giai-tri.rss` | `Allow: /` |
+| Tuổi Trẻ Giải trí | `https://tuoitre.vn/rss/giai-tri.rss` | Feed path permitted |
+| Thanh Niên Giải trí | `https://thanhnien.vn/rss/giai-tri.rss` | Only `/tim-kiem.htm` and `/news-*.htm` disallowed |
+| Hacker News search (Algolia) | `https://hn.algolia.com/api/v1/search` | No restrictions, public documented API |
+
+Rejected sources
+
+- Dailymotion API — `Disallow: /`.
+- Google News RSS — `Disallow: /` and redirects.
+- Kenh14 RSS — HTTP 404.
+- Vietnamese Wikipedia top views — noisy results and sensitive topics.
+
 ## Decisions for the design
 1. Build the SQLite persistent queue (WAL, leases, fenced, backoff, dead letter) — validated by E4.
 2. First connectors: Hacker News, Google Trends VN, Wikimedia. TikTok oEmbed = enrichment only. YouTube after a fix.

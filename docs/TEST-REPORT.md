@@ -6,7 +6,7 @@ Báo cáo này ghi những gì **đã được chạy thật** và kết quả t
 Windows 11, Python 3.12, Node 24, máy cá nhân (10 lõi, 32 GB RAM). Gemini qua Antigravity CLI (`agy`), Codex qua đăng nhập gói ChatGPT, Claude Code làm Leader duyệt hồ sơ. Không có API key, không dịch vụ trả phí.
 
 ## 2. Kiểm thử tự động
-`python -m pytest -q` (đặt `--basetemp` vào thư mục riêng vì `%TEMP%\pytest-of-<user>` có thể bị từ chối quyền): **299 test qua**, 32 subtest. Script Windows có bài tự kiểm thử riêng `scripts/windows/selftest.ps1`: 4/4 PASS bằng tiến trình giả (không đụng tiến trình thật).
+`python -m pytest -q` (đặt `--basetemp` vào thư mục riêng vì `%TEMP%\pytest-of-<user>` có thể bị từ chối quyền): **300 test, 299-300 qua tùy lần chạy** (sau khi bỏ đăng nhập dashboard; trước đó ghi 299 qua), 37 subtest. Một test về lease của worker chập chờn, kể cả trên bản trước thay đổi (xem `docs/LIMITATIONS.md` mục 21). Script Windows có bài tự kiểm thử riêng `scripts/windows/selftest.ps1`: 4/4 PASS bằng tiến trình giả (không đụng tiến trình thật).
 
 ## 3. Chạy thử đầu-cuối trên dữ liệu thật
 Một tiến trình duy nhất (API + dashboard + bộ lập lịch + orchestrator + poller Telegram), cơ sở dữ liệu mới, ba nguồn thật.
@@ -64,3 +64,29 @@ Test với giả lập đều qua trong mọi trường hợp dưới đây; ch�
 6. Hệ thống soạn brief bằng AI cho **mọi** mục (108 job trong 20 giây): thêm bộ lọc trước khi soạn.
 7. Rà soát phản biện độc lập tìm ra 7 lỗi thật, đã sửa: tệp `config/hunter.env` không nằm trong `.gitignore`; cổng cảnh báo P1 từ chối mọi nhãn xác minh nên không thể gửi cảnh báo P1; tạm dừng vì hết quota không bao giờ kết thúc; một lỗi khóa SQLite làm chết mọi worker; nhấn nút Telegram sau khi mất phản hồi gửi không được ghi nhận; script dừng có thể giết nhầm tiến trình do PID tái sử dụng (đã suýt xảy ra với Chrome của người dùng); chạy nền truyền khóa API cho tiến trình con trước khi lọc.
 8. Một lần commit thiếu file do bỏ qua thông báo lỗi của `git add`: đã commit bù, thông điệp commit ghi rõ.
+
+
+## 7. Lần chạy thật thứ hai: hướng phim ngắn, giải trí, làm bằng AI (22/11/2026)
+Cơ sở dữ liệu mới, 5 nguồn thật (thêm báo giải trí VnExpress, Tuổi Trẻ, Thanh Niên và tìm kiếm Hacker News theo chủ đề), runtime bật, Gemini soạn, Claude duyệt, **không gửi Telegram**.
+
+| Bước | Kết quả thật |
+|---|---|
+| Thu thập | 181 mục, 5 lần thu thập thành công. Đo riêng bằng bộ chấm điểm thật trên 211 mục: nhãn `giai_tri` 37 mục, `phim_ngan` 0, `micro_drama` 0, `ai_san_xuat` 1 |
+| Cổng lọc | 25 mục được chọn để soạn (cổng áp dụng riêng cho từng nguồn: nhóm trọng tâm tối đa 10, nhóm chung tối đa 4 mỗi lượt quét) |
+| Soạn brief | 25 brief trong khoảng 4 phút, 55 job thành công, 0 job chết |
+| Duyệt vòng 1 | 1 duyệt, 17 từ chối, 7 yêu cầu sửa |
+| Duyệt vòng 2 | 7 duyệt. Cuối cùng 8 hồ sơ vào Inbox, 17 bị từ chối, 0 `REVIEW_FAILED` |
+| Bộ lọc Inbox | `ai_feasibility=CAO` trả 8, `focus_tag=giai_tri` trả 3, giá trị lạ trả 422; dashboard đã chụp màn hình bằng Edge chạy ẩn |
+
+Tiêu chí duyệt dùng cho lần này (nêu rõ để quản trị đổi nếu muốn): từ chối tin về đời tư hoặc hoạt động của người thật mà Gemini tự đánh giá khả năng làm bằng AI là Thấp (9 hồ sơ người nổi tiếng, trong đó 1 hồ sơ về sức khỏe, nhạy cảm), tin thể thao trực tiếp, tin tài chính, hồ sơ trùng chủ đề (3 hồ sơ Giả thuyết Riemann trùng nhau), hồ sơ chỉ có lượt xem trang kèm từ nói về tốc độ tăng. Giữ lại và cho sửa các hồ sơ có ý tưởng GỐC làm được bằng AI (mascot hoạt hình hư cấu, minh họa sử thi thuộc phạm vi công cộng, bối cảnh giả tưởng nguyên bản).
+
+### Lỗi chỉ lộ ra khi chạy thật lần này, đã sửa
+1. **Nhãn "Giải trí" gắn cho 60/60 tin của feed giải trí** vì nhãn chuyên mục của feed bị tính như từ khóa nội dung (kể cả "Mốt trench coat", "Ẩm thực mẹ làm"). Sau sửa còn 33/60.
+2. **Nhãn "Sản xuất bằng AI" gắn nhầm** cho AI voice agents, resume, bể cá. Sau sửa còn 1/21 (đúng).
+3. **Độ tin cậy luôn 35 điểm** do tra bảng theo ID nguồn (UUID) thay vì tên nền tảng. Sau sửa: Wikipedia 90, Google Trends 85, Hacker News 80, báo Việt Nam 65. Hệ quả: nhiều hồ sơ lên P2 (ví dụ từ khóa "lịch âm"); độ tin cậy này đo uy tín của nguồn, không phải độ đúng của từng nội dung.
+4. **`has_body_content` coi câu mô tả RSS là toàn văn**, nên brief từ báo mất dòng cảnh báo "chỉ dựa trên metadata". Đã sửa và có test hồi quy.
+5. **Lời nhắc soạn chưa cấm từ tăng trưởng** khi chỉ có một ảnh chụp: gần hết brief Wikipedia viết "đột biến", "tăng vọt", "làn sóng"; có brief còn khẳng định GTA VI "chưa ra mắt" trong khi bằng chứng thu thập cùng ngày nói đã ra mắt. Đã thêm quy tắc 13 và 14 vào lời nhắc; các bản sửa đều hết lỗi này.
+6. Điểm nội bộ lẫn vào tóm tắt ("bài viết ghi nhận mức độ phù hợp cao"): đã cấm trong lời nhắc, bản sửa không còn.
+7. Test giả của `test_review_fixes_telegram.py` thiếu `ai_production`: đã sửa.
+
+Test tự động sau các thay đổi: 395 test; trong ba lần chạy, hai lần qua hết, một lần chỉ fail test chập chờn `test_result_from_lost_lease_is_discarded` (`docs/LIMITATIONS.md` mục 21).

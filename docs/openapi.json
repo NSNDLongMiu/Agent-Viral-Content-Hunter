@@ -30,74 +30,6 @@
         }
       }
     },
-    "/auth/login": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Login",
-        "description": "Exchange the admin password for an expiring bearer session.",
-        "operationId": "login_auth_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Valid credentials required"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/logout": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "summary": "Logout",
-        "description": "Revoke the current admin bearer session.",
-        "operationId": "logout_auth_logout_post",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "Valid credentials required"
-          }
-        },
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ]
-      }
-    },
     "/briefs/inbox": {
       "get": {
         "tags": [
@@ -106,11 +38,6 @@
         "summary": "Inbox",
         "description": "List only Claude-approved briefs with optional discovery filters.",
         "operationId": "inbox_briefs_inbox_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "priority",
@@ -195,6 +122,44 @@
             }
           },
           {
+            "name": "ai_feasibility",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AIFeasibility"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ai Feasibility"
+            }
+          },
+          {
+            "name": "focus_tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "phim_ngan",
+                    "micro_drama",
+                    "giai_tri",
+                    "ai_san_xuat"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Focus Tag"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -233,9 +198,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -263,11 +225,6 @@
         "summary": "Brief Detail",
         "description": "Get an approved brief and its review history.",
         "operationId": "brief_detail_briefs__brief_id__get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "brief_id",
@@ -289,9 +246,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -320,11 +274,6 @@
         "summary": "Export Brief",
         "description": "Render an approved brief as Markdown or JSON.",
         "operationId": "export_brief_briefs__brief_id__export__format__get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "brief_id",
@@ -364,9 +313,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -440,14 +386,14 @@
               }
             }
           },
-          "401": {
-            "description": "Valid Claude leader service token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
+          },
+          "401": {
+            "description": "Valid Claude leader service token required"
           },
           "422": {
             "description": "Validation Error",
@@ -497,14 +443,14 @@
               }
             }
           },
-          "401": {
-            "description": "Valid Claude leader service token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
+          },
+          "401": {
+            "description": "Valid Claude leader service token required"
           },
           "422": {
             "description": "Validation Error",
@@ -564,14 +510,14 @@
               }
             }
           },
-          "401": {
-            "description": "Valid Claude leader service token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
+          },
+          "401": {
+            "description": "Valid Claude leader service token required"
           },
           "422": {
             "description": "Validation Error",
@@ -593,11 +539,6 @@
         ],
         "summary": "List Jobs",
         "operationId": "list_jobs_jobs_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "status",
@@ -654,9 +595,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -683,11 +621,6 @@
         ],
         "summary": "Get Job",
         "operationId": "get_job_jobs__job_id__get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "job_id",
@@ -709,9 +642,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -739,11 +669,6 @@
         ],
         "summary": "Job Attempts",
         "operationId": "job_attempts_jobs__job_id__attempts_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "job_id",
@@ -769,9 +694,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -799,11 +721,6 @@
         ],
         "summary": "List Sources",
         "operationId": "list_sources_sources_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -844,9 +761,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -871,11 +785,6 @@
         ],
         "summary": "Add Source",
         "operationId": "add_source_sources_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -896,9 +805,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -941,21 +847,13 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
           }
-        },
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ]
+        }
       }
     },
     "/sources/{source_id}": {
@@ -965,11 +863,6 @@
         ],
         "summary": "Get Source",
         "operationId": "get_source_sources__source_id__get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "source_id",
@@ -991,9 +884,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1019,11 +909,6 @@
         ],
         "summary": "Replace Source",
         "operationId": "replace_source_sources__source_id__put",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "source_id",
@@ -1056,9 +941,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -1085,11 +967,6 @@
         ],
         "summary": "Remove Source",
         "operationId": "remove_source_sources__source_id__remove_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "source_id",
@@ -1122,9 +999,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -1151,11 +1025,6 @@
         ],
         "summary": "List Handoffs",
         "operationId": "list_handoffs_handoffs_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "status",
@@ -1212,9 +1081,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -1240,11 +1106,6 @@
         "summary": "Select Handoff",
         "description": "Record admin selection for an approved brief and return its durable handoff.",
         "operationId": "select_handoff_handoffs_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1265,9 +1126,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1295,11 +1153,6 @@
         ],
         "summary": "Get Handoff",
         "operationId": "get_handoff_handoffs__handoff_id__get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "handoff_id",
@@ -1321,9 +1174,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1352,11 +1202,6 @@
         "summary": "Send Handoff",
         "description": "Send or reconcile a selected handoff using its stable deduplication key.",
         "operationId": "send_handoff_handoffs__handoff_id__send_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "handoff_id",
@@ -1378,9 +1223,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1412,11 +1254,6 @@
         "summary": "Check Ack",
         "description": "Read the acknowledgement state recorded by the Telegram poller.",
         "operationId": "check_ack_handoffs__handoff_id__check_ack_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "handoff_id",
@@ -1438,9 +1275,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1471,11 +1305,6 @@
         ],
         "summary": "List Feedback",
         "operationId": "list_feedback_feedback_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "brief_id",
@@ -1532,9 +1361,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -1559,11 +1385,6 @@
         ],
         "summary": "Add Feedback",
         "operationId": "add_feedback_feedback_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1584,9 +1405,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1626,21 +1444,13 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
           }
-        },
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ]
+        }
       }
     },
     "/settings/audit": {
@@ -1650,11 +1460,6 @@
         ],
         "summary": "Audit Log",
         "operationId": "audit_log_settings_audit_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -1695,9 +1500,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -1724,11 +1526,6 @@
         ],
         "summary": "Undo Change",
         "operationId": "undo_change_settings_audit__record_id__undo_post",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "record_id",
@@ -1761,9 +1558,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -1790,11 +1584,6 @@
         ],
         "summary": "Set Preference",
         "operationId": "set_preference_settings__key__put",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "key",
@@ -1825,9 +1614,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -1870,21 +1656,13 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
           }
-        },
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ]
+        }
       }
     },
     "/monitor/queues": {
@@ -1918,21 +1696,13 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
           "409": {
             "description": "The operation conflicts with persisted state"
           }
-        },
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ]
+        }
       }
     },
     "/monitor/errors": {
@@ -1942,11 +1712,6 @@
         ],
         "summary": "Monitor Errors",
         "operationId": "monitor_errors_monitor_errors_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "limit",
@@ -1987,9 +1752,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -2016,11 +1778,6 @@
         ],
         "summary": "Monitor Briefs",
         "operationId": "monitor_briefs_monitor_briefs_get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "status",
@@ -2077,9 +1834,6 @@
               }
             }
           },
-          "401": {
-            "description": "Valid admin access token required"
-          },
           "404": {
             "description": "Resource not found"
           },
@@ -2106,11 +1860,6 @@
         ],
         "summary": "Monitor Brief",
         "operationId": "monitor_brief_monitor_briefs__brief_id__get",
-        "security": [
-          {
-            "AdminBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "brief_id",
@@ -2132,9 +1881,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Valid admin access token required"
           },
           "404": {
             "description": "Resource not found"
@@ -2158,6 +1904,15 @@
   },
   "components": {
     "schemas": {
+      "AIFeasibility": {
+        "type": "string",
+        "enum": [
+          "CAO",
+          "TRUNG_BINH",
+          "THAP"
+        ],
+        "title": "AIFeasibility"
+      },
       "AIHealth": {
         "properties": {
           "name": {
@@ -2212,6 +1967,36 @@
           "local"
         ],
         "title": "AIName"
+      },
+      "AIProduction": {
+        "properties": {
+          "feasibility": {
+            "$ref": "#/components/schemas/AIFeasibility"
+          },
+          "approach_vi": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Approach Vi"
+          },
+          "constraints_vi": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Constraints Vi"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "feasibility",
+          "approach_vi",
+          "constraints_vi"
+        ],
+        "title": "AIProduction",
+        "description": "Whether and how an ORIGINAL piece inspired by this item could be made with generative AI tools.\n\nWritten by the drafter, checked by the Claude leader. It never promises quality, never names a paid product as a\nrequirement and never proposes copying a real person's likeness or voice or a copyrighted work."
       },
       "AIStatus": {
         "type": "string",
@@ -2620,6 +2405,29 @@
               }
             ],
             "title": "Score Explanation"
+          },
+          "focus_tags": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "phim_ngan",
+                "micro_drama",
+                "giai_tri",
+                "ai_san_xuat"
+              ]
+            },
+            "type": "array",
+            "title": "Focus Tags"
+          },
+          "ai_production": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AIProduction"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "type": "string",
@@ -3127,48 +2935,6 @@
         "title": "JobStatus"
       },
       "JsonValue": {},
-      "LoginInput": {
-        "properties": {
-          "password": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 1,
-            "format": "password",
-            "title": "Password",
-            "writeOnly": true
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "password"
-        ],
-        "title": "LoginInput"
-      },
-      "LoginResponse": {
-        "properties": {
-          "access_token": {
-            "type": "string",
-            "title": "Access Token"
-          },
-          "token_type": {
-            "type": "string",
-            "title": "Token Type",
-            "default": "bearer"
-          },
-          "expires_in": {
-            "type": "integer",
-            "title": "Expires In"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "access_token",
-          "expires_in"
-        ],
-        "title": "LoginResponse"
-      },
       "MetricSnapshot": {
         "properties": {
           "views": {
@@ -3279,6 +3045,12 @@
             "exclusiveMinimum": 0.0,
             "title": "Retry Base Seconds",
             "default": 5
+          },
+          "quota_cooldown_minutes": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Quota Cooldown Minutes",
+            "default": 30
           },
           "claude": {
             "type": "integer",
@@ -3725,11 +3497,6 @@
       }
     },
     "securitySchemes": {
-      "AdminBearer": {
-        "type": "http",
-        "description": "Admin login session",
-        "scheme": "bearer"
-      },
       "ClaudeBearer": {
         "type": "http",
         "description": "Claude leader service token",

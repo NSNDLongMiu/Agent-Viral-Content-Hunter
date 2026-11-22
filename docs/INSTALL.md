@@ -55,29 +55,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install.ps1
 
 ## 4. Thiết lập Cấu hình và Xác thực
 
-### Bước 3: Tạo Mật khẩu Quản trị (Admin Password Hash)
+### Bước 3: Không cần mật khẩu cho Dashboard
 
-Hệ thống bảo vệ Dashboard bằng mật khẩu quản trị được băm theo chuẩn scrypt an toàn. Hãy chạy công cụ tương tác sau:
-
-```powershell
-.\.venv\Scripts\python.exe -m hunter.api.auth
-```
-
-Công cụ sẽ yêu cầu bạn nhập mật khẩu admin mong muốn:
-```text
-Admin password: ********
-scrypt$a1b2c3d4e5f6...$7890abcdef...
-```
-
-Sao chép toàn bộ chuỗi bắt đầu bằng `scrypt$...` và mở file `config/settings.local.toml`. Điền chuỗi này vào mục `[auth]`:
-
-```toml
-[auth]
-session_ttl_seconds = 28800
-admin_password_hash = "scrypt$a1b2c3d4e5f6...$7890abcdef..."
-```
-
-*(Hoặc bạn có thể đặt biến môi trường `HUNTER_AUTH__ADMIN_PASSWORD_HASH` trong file `config/hunter.env`).*
+Dashboard **không có đăng nhập**: máy chủ chỉ lắng nghe `127.0.0.1` và từ chối request từ tên máy khác hoặc từ trang web lạ. Bạn không phải tạo mật khẩu. Chỉ có token của Claude Leader (Bước 4) là bắt buộc để duyệt brief.
 
 ### Bước 4: Tạo Token Dịch vụ cho Claude Leader (Claude Service Token)
 
@@ -179,7 +159,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\start-hunter.ps1 -Bac
 Mở trình duyệt web và truy cập:
 👉 **[http://127.0.0.1:8000/](http://127.0.0.1:8000/)**
 
-Nhập mật khẩu quản trị mà bạn đã thiết lập ở Bước 3 để đăng nhập vào Admin Dashboard.
+Dashboard mở thẳng, không cần đăng nhập.
 
 ---
 

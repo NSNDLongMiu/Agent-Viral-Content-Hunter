@@ -27,11 +27,17 @@ Khóa dịch vụ lấy từ biến môi trường `HUNTER_AUTH__CLAUDE_SERVICE_
 7. **Trùng lặp và Trend Cluster:** đã có hồ sơ cho cùng sự kiện thì từ chối hoặc gộp, không gửi thêm cảnh báo cho cùng một cụm khi không có diễn biến mới.
 8. **Rủi ro:** tin giả, nội dung nhạy cảm, quyền sử dụng, bản quyền. Gợi ý định dạng phải là ý tưởng nội dung gốc, không phải kịch bản hoàn chỉnh, không sao chép hay đăng lại video của người khác.
 9. **Dữ liệu thật:** không có số liệu, URL hoặc trích dẫn bị bịa.
+10. **Khả năng làm bằng AI (`ai_production`) và nhãn `focus_tags`:** đội sản xuất làm video bằng AI tạo sinh, nên mục này được duyệt kỹ như số liệu.
+    - `feasibility` phải khớp bằng chứng: `CAO` chỉ khi bản gốc làm được hoàn toàn bằng công cụ AI mà không cần người thật hay nhân vật/tập phim có bản quyền (hoạt hình, minh họa, truyện kể có giọng AI, nội dung giải thích, micro-drama với nhân vật tự tạo). Tin về người thật, sự kiện trực tiếp (tỷ số, tin nóng), chủ đề nhạy cảm hoặc tác phẩm có bản quyền thì phải là `THAP` hoặc `TRUNG_BINH`.
+    - `approach_vi` chỉ nêu *nhóm* công cụ và hình dung bản gốc lấy cảm hứng từ định dạng hoặc cấu trúc; không hứa chất lượng, không bắt buộc một sản phẩm trả phí cụ thể, không phải kịch bản hoàn chỉnh.
+    - `constraints_vi` có ít nhất một ràng buộc thật (bản quyền, chân dung và giọng người thật, nhãn "nội dung tạo bởi AI", điều cần xác minh).
+    - **Từ chối hoặc yêu cầu sửa ngay** nếu brief gợi ý tái tạo khuôn mặt hoặc giọng của người thật, sao chép nhân vật, cảnh hay tập phim có bản quyền, hoặc làm video khiến người xem tưởng là cảnh thật.
+    - `focus_tags` do mã gán, không phải AI; nếu nhãn rõ ràng sai so với nội dung (ví dụ tin bóng đá gắn `phim_ngan`) thì ghi vào lý do để chỉnh bộ từ khóa, và đừng duyệt chỉ vì có nhãn trọng tâm.
 
 ## Chọn hành động
 | Hành động | Khi nào | Lý do phải nêu |
 |---|---|---|
-| `APPROVE` | Đạt cả chín mục, hoặc lỗi nhỏ không ảnh hưởng độ tin cậy | Nêu bằng chứng đã đối chiếu (ví dụ "URL gốc mở được, số bình luận khớp, tóm tắt 74 từ") |
+| `APPROVE` | Đạt cả mười mục, hoặc lỗi nhỏ không ảnh hưởng độ tin cậy | Nêu bằng chứng đã đối chiếu (ví dụ "URL gốc mở được, số bình luận khớp, tóm tắt 74 từ") |
 | `REQUEST_REVISION` | Sửa được trong một vòng: thiếu nhãn, tóm tắt sai độ dài, nói quá về mức xác minh, thiếu ghi chú metadata | Nêu từng chỗ sai và cách sửa, đủ cụ thể để Gemini làm lại không cần đoán. Câu này được gửi nguyên văn làm phản hồi |
 | `REJECT` | Sai căn bản: nguồn không truy xuất được, bịa số liệu, ngoài phạm vi sản phẩm, trùng hoàn toàn, vi phạm quyền | Nêu lý do không thể sửa trong khuôn khổ hồ sơ này |
 

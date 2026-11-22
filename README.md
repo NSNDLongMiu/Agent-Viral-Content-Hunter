@@ -18,8 +18,8 @@ The last command starts a single local process. Check it from another PowerShell
 
 ## Configure access
 
-Copy `config/settings.example.toml` to `config/settings.local.toml`. Keep the local file on this machine. Generate the admin password hash interactively with `python -m hunter.api.auth` and assign the result to `auth.admin_password_hash`. Set `auth.claude_service_token` to a separately generated random token of at least 32 characters. Both settings can also come from the environment.
+Copy `config/settings.example.toml` to `config/settings.local.toml`. Keep the local file on this machine. Set `auth.claude_service_token` to a separately generated random token of at least 32 characters (or use `HUNTER_AUTH__CLAUDE_SERVICE_TOKEN`).
 
-The dashboard exchanges the admin password at `POST /auth/login` for a bearer session. The Claude leader uses its own service token. Until credentials are configured, those access paths deny requests. The incremental budget stays at 0 VND.
+The dashboard has no login or password: the server listens on `127.0.0.1` and refuses requests whose `Host` is not this machine or whose `Origin` is a foreign site, so other web pages open in your browser cannot drive it. Only the Claude leader's service token opens `/review/*`, so nothing reachable from the dashboard can approve a brief. Until that token is configured, review requests are denied. The incremental budget stays at 0 VND.
 
 See [architecture and integration contracts](docs/ARCHITECTURE.md) and the [API reference](docs/API.md).

@@ -112,7 +112,7 @@ Import these protocols and their input and result types from `hunter.interfaces`
 
 ## Configuration and access
 
-`config/settings.local.toml` is the optional local config. `HUNTER_CONFIG` points to an alternate TOML file. Environment variables override individual fields, including `HUNTER_DATABASE_PATH`, `HUNTER_QUEUE__CLAUDE`, `HUNTER_RETENTION__DAYS`, `HUNTER_AUTH__ADMIN_PASSWORD_HASH`, and `HUNTER_AUTH__CLAUDE_SERVICE_TOKEN`. Relative database paths are resolved from the repository root when launched from inside the checkout. By default, the database lives at `backend/data/hunter.sqlite3`.
+`config/settings.local.toml` is the optional local config. `HUNTER_CONFIG` points to an alternate TOML file. Environment variables override individual fields, including `HUNTER_DATABASE_PATH`, `HUNTER_QUEUE__CLAUDE`, `HUNTER_RETENTION__DAYS`, and `HUNTER_AUTH__CLAUDE_SERVICE_TOKEN`. Relative database paths are resolved from the repository root when launched from inside the checkout. By default, the database lives at `backend/data/hunter.sqlite3`.
 
 | `[runtime]` key | Environment variable | Default |
 | --- | --- | --- |
@@ -124,4 +124,4 @@ Import these protocols and their input and result types from `hunter.interfaces`
 
 `budget.allow_paid_api` is locked to false. Adapters must establish verified zero incremental cost and call `BudgetSettings.require_allowed(incurs_cost=...)` before external I/O. Paid or unknown cost fails closed. AI adapters must use the official subscription-authenticated CLIs and remove API-key and metered-mode variables from child environments. Persist only credential-free error codes or diagnostics.
 
-Admin authentication uses a salted scrypt password hash and opaque bearer sessions stored in the server process. Restarting the server expires admin sessions. The Claude Leader uses a distinct credential. The built dashboard calls the mounted API on the same loopback origin. Vite's development proxy forwards `/api` to the local server.
+The dashboard API has no login or admin sessions. `hunter/api/local_guard.py` refuses requests whose `Host` is not loopback and state-changing requests with a non-local `Origin` (CSRF and DNS rebinding). The Claude Leader keeps a distinct service token, which is the only credential the review routes accept, so nothing reachable from the dashboard can approve a brief. The built dashboard calls the mounted API on the same loopback origin. Vite's development proxy forwards `/api` to the local server.
